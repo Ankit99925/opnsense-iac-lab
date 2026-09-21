@@ -1,13 +1,19 @@
 - hosts: host
   become: true
   tasks:
-    - name: Install br-clients netplan config
+    - name: Install lab bridges netplan config
       ansible.builtin.template:
-        src: 99-br-clients.yaml.j2
-        dest: /etc/netplan/99-br-clients.yaml
+        src: 99-lab-bridges.yaml.j2
+        dest: /etc/netplan/99-lab-bridges.yaml
         owner: root
         group: root
         mode: "0600"
+      notify: apply netplan
+
+    - name: Remove old single-bridge config
+      ansible.builtin.file:
+        path: /etc/netplan/99-br-clients.yaml
+        state: absent
       notify: apply netplan
 
   handlers:

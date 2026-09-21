@@ -4,8 +4,10 @@ network:
     {{ usb_nic }}:
       dhcp4: false
   bridges:
-    br-clients:
-      interfaces: [{{ usb_nic }}]
+{% for b in bridges %}
+    {{ b.name }}:
+      interfaces: [{{ b.nics | join(', ') }}]
       dhcp4: false
       parameters:
         stp: false
+{% endfor %}
