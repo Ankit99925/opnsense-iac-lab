@@ -1,0 +1,15 @@
+- hosts: host
+  become: true
+  tasks:
+    - name: Install br-clients netplan config
+      ansible.builtin.template:
+        src: 99-br-clients.yaml.j2
+        dest: /etc/netplan/99-br-clients.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      notify: apply netplan
+
+  handlers:
+    - name: apply netplan
+      ansible.builtin.command: netplan apply

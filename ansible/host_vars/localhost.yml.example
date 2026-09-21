@@ -1,0 +1,2 @@
+usb_nic: enxXXXXXXXXXXX  # find yours with: ip -br link
+ansible_become_exe: sudo.ws

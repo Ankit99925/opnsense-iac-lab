@@ -1,0 +1,11 @@
+network:
+  version: 2
+  ethernets:
+    {{ usb_nic }}:
+      dhcp4: false
+  bridges:
+    br-clients:
+      interfaces: [{{ usb_nic }}]
+      dhcp4: false
+      parameters:
+        stp: false
