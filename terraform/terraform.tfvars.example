@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and set for your machine.
+
+opnsense_iso = "/var/lib/libvirt/isos/OPNsense-26.1-dvd-amd64.iso"
+
+qemu_uid = "64055"   # id -u libvirt-qemu
+kvm_gid  = "991"     # getent group kvm | cut -d: -f3
+
+# vm_user          = "ubuntu"
+# opnsense_machine = "pc-i440fx-resolute"   # qemu-system-x86_64 -machine help
+# server_machine   = "pc-q35-10.2"

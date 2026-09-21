@@ -22,6 +22,8 @@ variable "opnsense_iso" { type = string }
 variable "wan_network" { default = "default" }
 variable "clients_bridge" { default = "br-clients" }
 variable "trunk_bridge" { default = "br-trunk" }
+variable "vm_user" { default = "ubuntu" }
+variable "ssh_key_path" { default = "~/.ssh/id_ed25519.pub" }
 
 resource "libvirt_volume" "opnsense" {
   name          = "opnsense.qcow2"
@@ -32,8 +34,8 @@ resource "libvirt_volume" "opnsense" {
   target = {
     format = { type = "qcow2" }
     permissions = {
-      owner = "64055"
-      group = "991"
+      owner = var.qemu_uid
+      group = var.kvm_gid
       mode  = "0660"
     }
   }
@@ -58,7 +60,7 @@ resource "libvirt_domain" "opnsense" {
   os = {
     type         = "hvm"
     type_arch    = "x86_64"
-    type_machine = "pc-i440fx-resolute"
+    type_machine = var.opnsense_machine
   }
 
   devices = {
@@ -92,3 +94,131 @@ resource "libvirt_domain" "opnsense" {
     videos   = [{ model = { type = "vga" } }]
   }
 }
+
+resource "libvirt_cloudinit_disk" "server" {
+  name = "lab-server-init.iso"
+
+  meta_data = yamlencode({
+    instance-id    = "ubuntu-server"
+    local-hostname = "ubuntu-server"
+  })
+
+  user_data = <<-EOT
+    #cloud-config
+    users:
+      - name: ${var.vm_user}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - ${trimspace(file(pathexpand(var.ssh_key_path)))}
+  EOT
+
+  network_config = <<-EOT
+    network:
+      version: 2
+      ethernets:
+        lan:
+          match:
+            name: "en*"
+          addresses: [192.168.100.10/24]
+          routes:
+            - to: default
+              via: 192.168.100.1
+          nameservers:
+            addresses: [192.168.100.1]
+  EOT
+}
+
+resource "libvirt_volume" "ubuntu_base" {
+  name = "lab-ubuntu-base.qcow2"
+  pool = "default"
+
+  create = {
+    content = {
+      url = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    }
+  }
+
+  target = {
+    format      = { type = "qcow2" }
+    permissions = { owner = var.qemu_uid, group = var.kvm_gid, mode = "0660" }
+  }
+}
+
+resource "libvirt_volume" "server" {
+  name          = "lab-server.qcow2"
+  pool          = "default"
+  capacity      = 20
+  capacity_unit = "GiB"
+
+  target = {
+    format      = { type = "qcow2" }
+    permissions = { owner = var.qemu_uid, group = var.kvm_gid, mode = "0660" }
+  }
+
+  backing_store = {
+    path   = libvirt_volume.ubuntu_base.path
+    format = { type = "qcow2" }
+  }
+}
+
+resource "libvirt_domain" "server" {
+  name        = "ubuntu-server"
+  type        = "kvm"
+  memory      = 2
+  memory_unit = "GiB"
+  vcpu        = 2
+
+  os = {
+    type         = "hvm"
+    type_arch    = "x86_64"
+    type_machine = var.server_machine
+  }
+
+  features = {
+    acpi = true
+    apic = {}
+  }
+
+  cpu = { mode = "host-passthrough" }
+
+  devices = {
+    disks = [
+      {
+        device = "disk"
+        driver = { name = "qemu", type = "qcow2" }
+        source = { file = { file = libvirt_volume.server.path } }
+        backing_store = {
+          format = { type = "qcow2" }
+          source = { file = { file = libvirt_volume.ubuntu_base.path } }
+        }
+        target = { dev = "vda", bus = "virtio" }
+      },
+      {
+        device = "cdrom"
+        driver = { name = "qemu", type = "raw" }
+        source = { file = { file = libvirt_cloudinit_disk.server.path } }
+        target = { dev = "sda", bus = "sata" }
+      },
+    ]
+
+    interfaces = [
+      { source = { network = { network = libvirt_network.servers.name } }, model = { type = "virtio" } },
+    ]
+
+    consoles = [{ target = { type = "serial", port = 0 } }]
+  }
+}
+
+variable "qemu_uid" {
+  type        = string
+  description = "UID of libvirt-qemu: id -u libvirt-qemu"
+}
+
+variable "kvm_gid" {
+  type        = string
+  description = "GID of the kvm group: getent group kvm | cut -d: -f3"
+}
+
+variable "opnsense_machine" { default = "pc-i440fx-resolute" }
+variable "server_machine" { default = "pc-q35-10.2" }
