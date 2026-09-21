@@ -1,2 +1,17 @@
-usb_nic: enxXXXXXXXXXXX  # find yours with: ip -br link
+# Copy to localhost.yml and set your own values.
+
+# USB ethernet adapter enslaved into br-clients.
+# Find yours with: ip -br link   (usually enx followed by the MAC)
+usb_nic: enxXXXXXXXXXXXX
+
+# Only needed if sudo is sudo-rs (Ubuntu 25.10+) and Ansible
+# times out waiting for the become prompt. Remove otherwise.
 ansible_become_exe: sudo.ws
+
+# Bridges rendered into /etc/netplan/99-lab-bridges.yaml.
+# nics: physical interfaces to enslave; [] for a purely virtual bridge.
+bridges:
+  - name: br-clients
+    nics: ["{{ usb_nic }}"]
+  - name: br-trunk
+    nics: []
