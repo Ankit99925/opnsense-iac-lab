@@ -1,3 +1,7 @@
+# Changing these bridges makes `netplan apply` restart NetworkManager,
+# which rebuilds br-clients and br-trunk and unplugs any VM attached to
+# them. Stop OPNsense first, or run ops tapcheck afterwards and restart it.
+
 - hosts: host
   become: true
   tasks:
