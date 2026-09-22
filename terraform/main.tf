@@ -82,7 +82,7 @@ resource "libvirt_domain" "opnsense" {
     ]
 
     interfaces = [
-      { source = { network = { network = var.wan_network } }, model = { type = "virtio" } },
+      { source = { network = { network = var.wan_network } }, model = { type = "virtio" } , mac = { address = "52:54:00:b4:49:cb" }},
       { source = { network = { network = libvirt_network.servers.name } }, model = { type = "virtio" } },
       { source = { bridge = { bridge = var.clients_bridge } }, model = { type = "virtio" } },
       { source = { bridge = { bridge = var.trunk_bridge } }, model = { type = "virtio" } },
