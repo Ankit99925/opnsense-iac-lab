@@ -109,6 +109,8 @@ resource "libvirt_cloudinit_disk" "server" {
       - name: ${var.vm_user}
         sudo: ALL=(ALL) NOPASSWD:ALL
         shell: /bin/bash
+        lock_passwd: false
+        passwd: ${var.console_password_hash}
         ssh_authorized_keys:
           - ${trimspace(file(pathexpand(var.ssh_key_path)))}
   EOT
@@ -222,3 +224,8 @@ variable "kvm_gid" {
 
 variable "opnsense_machine" { default = "pc-i440fx-resolute" }
 variable "server_machine" { default = "pc-q35-10.2" }
+variable "console_password_hash" {
+  type        = string
+  sensitive   = true
+  description = "SHA-512 hash for console login: openssl passwd -6"
+}
