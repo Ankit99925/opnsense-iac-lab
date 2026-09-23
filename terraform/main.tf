@@ -241,3 +241,108 @@ variable "console_password_hash" {
   sensitive   = true
   description = "SHA-512 hash for console login: openssl passwd -6"
 }
+
+resource "libvirt_volume" "vlantest" {
+  name          = "lab-vlantest.qcow2"
+  pool          = "default"
+  capacity      = 10
+  capacity_unit = "GiB"
+
+  target = {
+    format      = { type = "qcow2" }
+    permissions = { owner = var.qemu_uid, group = var.kvm_gid, mode = "0660" }
+  }
+
+  backing_store = {
+    path   = libvirt_volume.ubuntu_base.path
+    format = { type = "qcow2" }
+  }
+
+  lifecycle {
+    ignore_changes = [target]
+  }
+}
+
+resource "libvirt_cloudinit_disk" "vlantest" {
+  name = "lab-vlantest-init.iso"
+
+  meta_data = yamlencode({
+    instance-id    = "vlantest"
+    local-hostname = "vlantest"
+  })
+
+  user_data = <<-EOT
+    #cloud-config
+    users:
+      - name: ${var.vm_user}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        lock_passwd: false
+        passwd: ${var.console_password_hash}
+        ssh_authorized_keys:
+          - ${trimspace(file(pathexpand(var.ssh_key_path)))}
+  EOT
+
+  network_config = <<-EOT
+    network:
+      version: 2
+      ethernets:
+        trunk:
+          match:
+            name: "en*"
+          dhcp4: false
+      vlans:
+        vlan10:
+          id: 10
+          link: trunk
+          dhcp4: true
+  EOT
+}
+
+resource "libvirt_domain" "vlantest" {
+  name        = "vlantest"
+  type        = "kvm"
+  memory      = 512
+  memory_unit = "MiB"
+  vcpu        = 1
+
+  os = {
+    type         = "hvm"
+    type_arch    = "x86_64"
+    type_machine = var.server_machine
+  }
+
+  features = {
+    acpi = true
+    apic = {}
+  }
+
+  cpu = { mode = "host-passthrough" }
+
+  devices = {
+    disks = [
+      {
+        device = "disk"
+        driver = { name = "qemu", type = "qcow2" }
+        source = { file = { file = libvirt_volume.vlantest.path } }
+        backing_store = {
+          format = { type = "qcow2" }
+          source = { file = { file = libvirt_volume.ubuntu_base.path } }
+        }
+        target = { dev = "vda", bus = "virtio" }
+      },
+      {
+        device = "cdrom"
+        driver = { name = "qemu", type = "raw" }
+        source = { file = { file = libvirt_cloudinit_disk.vlantest.path } }
+        target = { dev = "sda", bus = "sata" }
+      },
+    ]
+
+    interfaces = [
+      { source = { bridge = { bridge = var.trunk_bridge } }, model = { type = "virtio" } },
+    ]
+
+    consoles = [{ target = { type = "serial", port = 0 } }]
+  }
+}
