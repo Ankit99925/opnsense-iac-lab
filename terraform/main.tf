@@ -31,6 +31,10 @@ resource "libvirt_volume" "opnsense" {
   capacity      = 20
   capacity_unit = "GiB"
 
+  lifecycle {
+    ignore_changes = [target]
+  }
+
   target = {
     format = { type = "qcow2" }
     permissions = {
@@ -44,8 +48,8 @@ resource "libvirt_volume" "opnsense" {
 resource "libvirt_domain" "opnsense" {
   name        = "opnsense"
   type        = "kvm"
-  memory      = 2
-  memory_unit = "GiB"
+  memory      = 1536
+  memory_unit = "MiB"
   vcpu        = 2
 
   features = {
@@ -82,7 +86,7 @@ resource "libvirt_domain" "opnsense" {
     ]
 
     interfaces = [
-      { source = { network = { network = var.wan_network } }, model = { type = "virtio" } , mac = { address = "52:54:00:b4:49:cb" }},
+      { source = { network = { network = var.wan_network } }, model = { type = "virtio" }, mac = { address = "52:54:00:b4:49:cb" } },
       { source = { network = { network = libvirt_network.servers.name } }, model = { type = "virtio" } },
       { source = { bridge = { bridge = var.clients_bridge } }, model = { type = "virtio" } },
       { source = { bridge = { bridge = var.trunk_bridge } }, model = { type = "virtio" } },
@@ -135,6 +139,10 @@ resource "libvirt_volume" "ubuntu_base" {
   name = "lab-ubuntu-base.qcow2"
   pool = "default"
 
+  lifecycle {
+    ignore_changes = [target]
+  }
+
   create = {
     content = {
       url = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
@@ -153,6 +161,10 @@ resource "libvirt_volume" "server" {
   capacity      = 20
   capacity_unit = "GiB"
 
+  lifecycle {
+    ignore_changes = [target]
+  }
+
   target = {
     format      = { type = "qcow2" }
     permissions = { owner = var.qemu_uid, group = var.kvm_gid, mode = "0660" }
@@ -167,7 +179,7 @@ resource "libvirt_volume" "server" {
 resource "libvirt_domain" "server" {
   name        = "ubuntu-server"
   type        = "kvm"
-  memory      = 2
+  memory      = 1
   memory_unit = "GiB"
   vcpu        = 2
 
