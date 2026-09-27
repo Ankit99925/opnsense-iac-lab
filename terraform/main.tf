@@ -19,7 +19,6 @@ resource "libvirt_network" "servers" {
 }
 
 variable "opnsense_iso" { type = string }
-variable "wan_network" { default = "default" }
 variable "clients_bridge" { default = "br-clients" }
 variable "trunk_bridge" { default = "br-trunk" }
 variable "vm_user" { default = "ubuntu" }
@@ -86,7 +85,7 @@ resource "libvirt_domain" "opnsense" {
     ]
 
     interfaces = [
-      { source = { network = { network = var.wan_network } }, model = { type = "virtio" }, mac = { address = "52:54:00:b4:49:cb" } },
+      { source = { network = { network = libvirt_network.default.name } }, model = { type = "virtio" }, mac = { address = local.opnsense_wan_mac } },
       { source = { network = { network = libvirt_network.servers.name } }, model = { type = "virtio" } },
       { source = { bridge = { bridge = var.clients_bridge } }, model = { type = "virtio" } },
       { source = { bridge = { bridge = var.trunk_bridge } }, model = { type = "virtio" } },
