@@ -67,21 +67,34 @@ echo "  ok: tools, libvirt, golden image, config backup, credentials"
 
 # -------------------------------------------------------------- config backup
 step "OPNsense config backup"
+# /api/core/backup/download/this returns the newest entry in OPNsense's
+# configuration history, not necessarily the live config. Right after a rebuild
+# (config loaded by the boot hook, which bypasses the history) that entry is the
+# golden image's factory config. So a download is only accepted if it looks like
+# the lab's config; otherwise the existing 'latest' is kept.
+latest="$BACKUP_DIR/config-OPNsense-latest.xml"
 if api_up; then
   out="$BACKUP_DIR/config-OPNsense-$(date +%F-%H%M%S).xml"
-  if curl -sk --max-time 20 -u "$OPN_KEY:$OPN_SECRET" \
-       "https://$OPN_HOST/api/core/backup/download/this" -o "$out.part" \
-     && head -n 2 "$out.part" | grep -q '<opnsense>' \
-     && ! grep -q 'BEGIN config.xml' "$out.part"; then
-    mv "$out.part" "$out" && chmod 600 "$out"
-    ln -sfn "$(basename "$out")" "$BACKUP_DIR/config-OPNsense-latest.xml"
-    echo "  ok: saved $(basename "$out"), now 'latest'"
-  else
+  curl -sk --max-time 20 -u "$OPN_KEY:$OPN_SECRET" \
+    "https://$OPN_HOST/api/core/backup/download/this" -o "$out.part" || true
+  [ -f "$out.part" ] && chmod 600 "$out.part"
+  if ! { head -n 2 "$out.part" | grep -q '<opnsense>' && ! grep -q 'BEGIN config.xml' "$out.part"; }; then
     rm -f "$out.part"
     die "OPNsense answered but the backup download was not a valid unencrypted config"
+  elif grep -q '<trigger_initial_wizard' "$out.part" || ! grep -q 'vlan01' "$out.part"; then
+    mv "$out.part" "$out.rejected"
+    echo "  WARNING: the download looks like a factory-default config, not the lab's."
+    echo "           Kept $(readlink "$latest"); rejected copy: $(basename "$out.rejected")"
+  elif cmp -s "$out.part" "$latest"; then
+    rm -f "$out.part"
+    echo "  ok: config unchanged since $(readlink "$latest")"
+  else
+    mv "$out.part" "$out"
+    ln -sfn "$(basename "$out")" "$latest"
+    echo "  ok: saved $(basename "$out"), now 'latest'"
   fi
 else
-  echo "  OPNsense not reachable: using existing $(readlink "$BACKUP_DIR/config-OPNsense-latest.xml")"
+  echo "  OPNsense not reachable: using existing $(readlink "$latest")"
 fi
 
 # --------------------------------------------------------------- host bridges
