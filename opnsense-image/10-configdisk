@@ -1,0 +1,32 @@
+#!/bin/sh
+# Boot hook for the lab's OPNsense golden image.
+# Installed as /usr/local/etc/rc.syshook.d/early/10-configdisk
+#
+# If a config ISO is attached (built by Terraform), load its config.xml
+# the first time that exact file is seen, then reboot so every service
+# starts with it. The checksum marker stops it reapplying the same file
+# on every boot, so later GUI changes survive until a new ISO is supplied.
+
+MNT=/tmp/configdisk
+MARK=/conf/configdisk.sha256
+
+mkdir -p "$MNT"
+for dev in /dev/cd[0-9]*; do
+    [ -e "$dev" ] || continue
+    mount -t cd9660 -o ro "$dev" "$MNT" 2>/dev/null || continue
+    SRC="$MNT/user-data"
+    if [ -f "$SRC" ] && head -n 2 "$SRC" | grep -q '<opnsense>'; then
+        NEW=$(sha256 -q "$SRC")
+        if [ "$NEW" != "$(cat "$MARK" 2>/dev/null)" ]; then
+            cp /conf/config.xml /conf/config.xml.before-configdisk 2>/dev/null
+            cp "$SRC" /conf/config.xml
+            echo "$NEW" > "$MARK"
+            umount "$MNT"
+            echo "configdisk: loaded new config.xml, rebooting"
+            reboot
+            exit 0
+        fi
+    fi
+    umount "$MNT"
+done
+exit 0
