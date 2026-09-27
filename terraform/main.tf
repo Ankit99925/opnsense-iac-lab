@@ -11,7 +11,8 @@ provider "libvirt" {
 }
 
 resource "libvirt_network" "servers" {
-  name = "servers"
+  name      = "servers"
+  autostart = true
 
   bridge = {
     name = "virbr2"
@@ -50,6 +51,7 @@ resource "libvirt_volume" "opnsense" {
 
 resource "libvirt_domain" "opnsense" {
   name        = "opnsense"
+  autostart   = true
   type        = "kvm"
   memory      = 1536
   memory_unit = "MiB"
@@ -185,6 +187,7 @@ resource "libvirt_volume" "server" {
 
 resource "libvirt_domain" "server" {
   name        = "ubuntu-server"
+  autostart   = true
   type        = "kvm"
   memory      = 1
   memory_unit = "GiB"
@@ -308,6 +311,7 @@ resource "libvirt_cloudinit_disk" "vlantest" {
 
 resource "libvirt_domain" "vlantest" {
   name        = "vlantest"
+  autostart   = true
   type        = "kvm"
   memory      = 512
   memory_unit = "MiB"
