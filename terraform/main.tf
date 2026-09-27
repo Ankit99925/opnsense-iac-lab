@@ -18,7 +18,6 @@ resource "libvirt_network" "servers" {
   }
 }
 
-variable "opnsense_iso" { type = string }
 variable "clients_bridge" { default = "br-clients" }
 variable "trunk_bridge" { default = "br-trunk" }
 variable "vm_user" { default = "ubuntu" }
@@ -29,6 +28,11 @@ resource "libvirt_volume" "opnsense" {
   pool          = "default"
   capacity      = 20
   capacity_unit = "GiB"
+
+  backing_store = {
+    path   = var.opnsense_golden_image
+    format = { type = "qcow2" }
+  }
 
   lifecycle {
     ignore_changes = [target]
@@ -72,13 +76,17 @@ resource "libvirt_domain" "opnsense" {
         device = "disk"
         driver = { name = "qemu", type = "qcow2" }
         source = { file = { file = libvirt_volume.opnsense.path } }
+        backing_store = {
+          format = { type = "qcow2" }
+          source = { file = { file = var.opnsense_golden_image } }
+        }
         target = { dev = "vda", bus = "virtio" }
         boot   = { order = 1 }
       },
       {
         device = "cdrom"
         driver = { name = "qemu", type = "raw" }
-        source = { file = { file = var.opnsense_iso } }
+        source = { file = { file = libvirt_volume.opnsense_config.path } }
         target = { dev = "sda", bus = "sata" }
         boot   = { order = 2 }
       },
@@ -210,7 +218,7 @@ resource "libvirt_domain" "server" {
       {
         device = "cdrom"
         driver = { name = "qemu", type = "raw" }
-        source = { file = { file = libvirt_cloudinit_disk.server.path } }
+        source = { file = { file = libvirt_volume.server_cloudinit.path } }
         target = { dev = "sda", bus = "sata" }
       },
     ]
@@ -333,7 +341,7 @@ resource "libvirt_domain" "vlantest" {
       {
         device = "cdrom"
         driver = { name = "qemu", type = "raw" }
-        source = { file = { file = libvirt_cloudinit_disk.vlantest.path } }
+        source = { file = { file = libvirt_volume.vlantest_cloudinit.path } }
         target = { dev = "sda", bus = "sata" }
       },
     ]
