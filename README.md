@@ -1,4 +1,117 @@
-# lab
+# opnsense-iac-lab
+
+A segmented OPNsense firewall lab on KVM, defined entirely in code.
+One command destroys it and rebuilds it from nothing, then verifies it with layered
+smoke tests, including a test that the firewall's block rules came back.
+**About 7 minutes from nothing to verified.**
+
+```bash
+./scripts/rebuild.sh --fresh
+```
+
+## Topology
+
+```mermaid
+flowchart TB
+  inet((Internet)) --- nat
+  subgraph host["mera-server: Ubuntu 26.04, KVM/libvirt"]
+    nat["default network<br/>libvirt NAT 192.168.122.0/24"]
+    opn["OPNsense<br/>firewall, router, Kea DHCP"]
+    srv["ubuntu-server<br/>Pi-hole 192.168.100.10"]
+    vt["vlantest<br/>VLAN 10, QEMU guest agent"]
+    nat -- "WAN .69" --- opn
+    opn -- "SERVERS 192.168.100.0/24" --- srv
+    opn -- "br-trunk: VLANs 10/20/30<br/>10.20.x.0/24" --- vt
+  end
+  opn -- "CLIENTS 192.168.200.0/24<br/>br-clients + USB NIC" --- ap["Wi-Fi AP<br/>(phones, laptops)"]
+```
+
+## How it is built
+
+| Piece | Tool | Job |
+|---|---|---|
+| Host networking | Ansible | Linux bridges for CLIENTS and the VLAN trunk (netplan) |
+| Networks and VMs | Terraform (libvirt provider) | NAT and isolated networks, three VMs, cloud-init, autostart |
+| Firewall | Golden image + boot hook | Installed OPNsense image; its config is loaded at boot from an ISO |
+| Services | Ansible | Pi-hole in Docker on the Ubuntu server |
+| Orchestration | Bash | `scripts/rebuild.sh`: preflight, backup, build, wait, configure, test |
+| Verification | Bash + QEMU guest agent | `scripts/smoke.sh`: six layers, host to firewall rules |
+
+`rebuild.sh` has two modes: **converge** (default: build what is missing, fix drift, safe to
+rerun after a failure) and **`--fresh`** (destroy everything, then build from nothing).
+
+## What the smoke tests prove
+
+1. **Host:** bridges up, all VMs running, every VM NIC on the right bridge
+2. **OPNsense:** its API answers, so the config (and API key) was loaded
+3. **Routing:** the host reaches SERVERS through the firewall
+4. **Services:** Pi-hole answers DNS; the server reaches the internet through NAT
+5. **VLANs:** Kea leased vlantest an address on VLAN 10 (trunk, tagging, DHCP)
+6. **Firewall rules:** from *inside* VLAN 10, the internet is reachable (positive control)
+   but the gateway is not (block rule), run through the QEMU guest agent so the test
+   needs no network path into the isolated VLAN
+
+## Design decisions
+
+- **Image and config are separate.** The golden image holds only an installed OPNsense plus a
+  small boot hook. The config arrives on an ISO built by Terraform; the hook loads it once
+  (checksum marker, one reboot) and leaves later GUI changes alone. A rule change never
+  needs a new image.
+- **Backups are checked, not trusted.** OPNsense's backup API serves the newest entry in its
+  configuration *history*, which right after a rebuild is the factory config. A `--fresh`
+  run once loaded that and came up blank. The backup step now rejects anything that does
+  not look like this lab's config.
+- **Hand-built things were brought under code.** libvirt's `default` network (DHCP
+  reservation and route) was imported into Terraform; a provider gap forced a planned
+  one-time replacement.
+- **Nothing important lives in `/tmp`.** The provider writes cloud-init ISOs to `$TMPDIR`,
+  which is tmpfs on this host; VMs attach copies in the storage pool, and a Terraform
+  `check` block warns if an ISO ever lands in `/tmp`.
+- **VMs are cattle.** Drift inside a VM (a hand edit moved vlantest to another VLAN) is fixed
+  by rebuilding it from code, not by editing it back. The smoke tests caught that drift.
+- **Secrets stay out of git.** State, tfvars, host variables, config backups and API
+  credentials are gitignored or live outside the repo; history is scanned with gitleaks.
+
+## Prerequisites
+
+- **A Linux host.** The libvirt provider and netplan are Linux-only; built and tested on
+  Ubuntu Server 26.04, x86-64 with hardware virtualization, 12 GB RAM or more.
+- **Host tools:** libvirt/QEMU, Terraform, Ansible (with the `community.libvirt`,
+  `community.general` and `community.docker` collections), curl, dig, Python 3.
+  *(Next: `bootstrap.sh` installs them.)*
+- **For the CLIENTS zone:** a USB Ethernet adapter and a Wi-Fi access point.
+- **Files kept out of git on purpose.** The repo holds the code, not the data it builds with:
+  - the OPNsense **golden image**: too big for git; built once (see REBUILD.md)
+  - the OPNsense **config backup**: firewall rules, VLANs, Kea DHCP and aliases live inside
+    OPNsense, not in this repo. The backup holds password hashes and the API key.
+    (opnwatch, a separate monitoring project, also fetches it daily and reports changed sections.)
+  - **machine-specific values and secrets:** `terraform.tfvars`, the Ansible `host_vars`,
+    the API credentials, an SSH key
+
+Exact paths, where each file comes from, and the full rebuild procedure:
+**[REBUILD.md](REBUILD.md)**.
+
+## Limitations and next steps
+
+- The golden image is built by hand (next: Packer).
+- Tools are installed by hand on the host (next: `bootstrap.sh`, proven on a fresh Ubuntu VM).
+- Terraform state is a local file (fine for one person; teams use a remote backend).
+- Later: generate the variables from a CSV parameter sheet; trigger rebuilds from CI.
+
+## Repo layout
+
+```
+terraform/        networks, VMs, cloud-init, config ISO, guards
+ansible/          host bridges, Pi-hole
+scripts/          rebuild.sh, smoke.sh, tapcheck
+opnsense-image/   boot hook baked into the golden image
+REBUILD.md        runbook: rebuild from scratch, gotchas, automation status
+```
+
+---
+
+## Lab details
+
 
 A segmented home network running as virtual machines on one Ubuntu host
 (`mera-server`). OPNsense is the firewall and router; everything else sits
@@ -10,7 +123,7 @@ hours to work out the first time.
 
 ---
 
-## Topology
+## Topology in detail
 
     Internet
        |  (mobile connection, carrier-grade NAT — inbound is impossible)
@@ -43,131 +156,60 @@ without affecting anything.
 
 ## Who owns what
 
-Four bridges exist on the host, created by three different things. This matters
-because none of them knows about the others.
+Four bridges exist on the host, created by three different things.
 
-| Bridge       | Zone     | Created by                          |
-|--------------|----------|-------------------------------------|
-| `virbr0`     | WAN      | libvirt's built-in `default` network |
-| `virbr2`     | SERVERS  | libvirt, from `libvirt_network.servers` here |
-| `br-clients` | CLIENTS  | Ansible, via netplan                |
-| `br-trunk`   | trunk    | Ansible, via netplan                |
+| Bridge       | Zone     | Created by |
+|--------------|----------|------------|
+| `virbr0`     | WAN      | libvirt, from `libvirt_network.default` (Terraform, `terraform/default_network.tf`) |
+| `virbr2`     | SERVERS  | libvirt, from `libvirt_network.servers` (Terraform) |
+| `br-clients` | CLIENTS  | Ansible, via netplan (`ansible/bridge.yml`) |
+| `br-trunk`   | trunk    | Ansible, via netplan (`ansible/bridge.yml`) |
 
-| Piece                                   | Managed by            |
-|-----------------------------------------|-----------------------|
-| SERVERS network, all VMs, all volumes   | Terraform (this repo) |
-| `br-clients`, `br-trunk`                | Ansible (`~/ansible/lab`) |
-| Pi-hole                                 | Ansible               |
-| DHCP reservation for OPNsense, host route | libvirt `default` network, edited by hand |
-| Firewall rules, VLANs, Kea DHCP         | OPNsense, by hand     |
+| Piece | Managed by |
+|-------|------------|
+| `default` network, incl. OPNsense's DHCP reservation and the host route to SERVERS | Terraform |
+| SERVERS network, all VMs, volumes, cloud-init and config ISOs | Terraform |
+| `br-clients`, `br-trunk` | Ansible |
+| Pi-hole | Ansible |
+| OPNsense installed system and boot hook | Golden image (built by hand, see REBUILD.md) |
+| Firewall rules, VLANs, Kea DHCP, API key | OPNsense config backup, loaded at boot by the hook |
 
-Terraform refers to `br-clients` and `br-trunk` by name only. Nothing checks
-that Ansible has created them. A typo on either side breaks the link silently.
+Terraform refers to `br-clients` and `br-trunk` by name only; it does not create them.
+`scripts/smoke.sh` checks both bridges are up, and `scripts/tapcheck` checks every VM
+network card is attached to the bridge it should be.
 
 ---
 
 ## Rebuild order
 
-1. **Ansible** creates the bridges. Terraform will define VMs that attach to
-   them, and a VM cannot start if its bridge does not exist.
+One command, from the repo root:
 
-       cd ~/ansible/lab
-       ansible-playbook -i inventory.ini bridge.yml -K
+    ./scripts/rebuild.sh            # converge: build what is missing, fix drift
+    ./scripts/rebuild.sh --fresh    # destroy everything, then build from nothing
 
-2. **Terraform** creates the SERVERS network, the VMs and their disks.
+It runs, in order:
 
-       cd ~/terraform/lab
-       terraform init
-       terraform plan
-       terraform apply
+1. **Preflight:** tools, golden image, config backup, credentials
+2. **Config backup** from OPNsense's API, accepted only if it looks like this lab's config
+3. **Ansible** creates the bridges. VMs attach to them, and a VM cannot start if its bridge does not exist.
+4. **Terraform** creates the networks, the VMs and their disks; the VMs start themselves
+5. **OPNsense** boots the golden image; the boot hook loads the config from its ISO and reboots once
+6. **Ubuntu server:** wait for SSH, refresh its host key, wait for cloud-init
+7. **Ansible** deploys Pi-hole
+8. **Smoke tests,** all six layers
 
-3. **Install OPNsense by hand** — see below.
+Details, failure recovery and the files that are not in git: [REBUILD.md](REBUILD.md).
 
-4. **Restore the OPNsense config** — see below.
+## What is still done by hand
 
-5. **Ansible** deploys Pi-hole.
+- **Building the golden image,** rarely: a new OPNsense version or a hook change. Steps in REBUILD.md.
+- **Changing firewall rules, VLANs or Kea** in the OPNsense GUI, then taking a backup.
+  The backup, not the running firewall, is what a rebuild uses.
+- **Creating the OPNsense API key,** once. It then lives in the config backup and in
+  `~/.config/opnsense-iac-lab/creds.env`.
+- **Installing the host's tools** (next: `bootstrap.sh`).
 
-       cd ~/ansible/lab
-       ssh-keygen -R 192.168.100.10     # the server has new host keys
-       ansible-playbook -i inventory.ini pihole.yml
-
-6. **Check the wiring.**
-
-       ops tapcheck
-
----
-
-## The manual steps
-
-### Installing OPNsense
-
-OPNsense ships an interactive installer, not a pre-built cloud image, so this
-cannot be automated here. Do it once and keep the result.
-
-1. `terraform apply` with the cdrom at `boot = { order = 1 }`
-2. `virsh start opnsense`, then open the console in Virt-Manager
-3. At the live prompts, decline VLANs, WAN `vtnet0`, LAN `vtnet1`
-4. Log in as `installer` / `opnsense`, install to `vtbd0`, UFS
-5. **Halt at the end — do not reboot**, or it boots the installer again
-6. Swap the boot orders in `main.tf` (disk 1, cdrom 2) and `terraform apply`
-7. Save a golden image before first boot:
-
-       sudo cp /var/lib/libvirt/images/opnsense.qcow2 \
-               /var/lib/libvirt/images/opnsense-26.1-base.qcow2
-
-That copy is a clean installed system with no configuration. Pointing the
-volume at it as a backing store would remove this step from future rebuilds.
-
-### Reaching the web interface for the first time
-
-A fresh install serves its interface on the LAN side, and blocks the WAN side.
-The host is only on WAN. So:
-
-1. OPNsense console, option **8** for a shell
-2. `pfctl -d` — disables the packet filter until the next reboot
-3. Browse from the host to `https://192.168.122.69`, accept the certificate
-4. Restore the config; the firewall comes back with your own rules
-
-Afterwards, an SSH tunnel is the tidier route and needs no rule:
-
-    ssh -N -L 8080:localhost:443 root@192.168.122.69
-    # then browse to https://localhost:8080
-
-### Restoring the config
-
-System → Configuration → Backups → Restore, with the newest file from
-`~/lab-backup/`. It reboots.
-
-**The restore replaces the root password** with the one from the backup. Know
-it before you start.
-
-Check the console header afterwards: WAN, SERVERS and CLIENTS should be on
-`vtnet0`, `vtnet1` and `vtnet2`. If they are not, the NIC order in `main.tf` is
-wrong — see below.
-
-### The libvirt `default` network
-
-Two things live in libvirt's own network definition, not in this repo:
-
-    virsh net-edit default
-
-A reservation, inside `<dhcp>`:
-
-    <host mac='52:54:00:b4:49:cb' name='opnsense' ip='192.168.122.69'/>
-
-And a route, after the closing `</ip>`:
-
-    <route address='192.168.100.0' prefix='24' gateway='192.168.122.69'/>
-
-The route is what lets the host reach the server on SERVERS, which is what
-Ansible needs. The reservation is what keeps that gateway address stable, and
-it works because the WAN MAC is pinned in `main.tf`.
-
-Restart the network for changes to take effect, with OPNsense stopped first:
-
-    virsh net-destroy default && virsh net-start default
-
-A copy of the definition is kept at `~/lab-backup/net-default.xml`.
+The earlier manual install and restore instructions are in this repo's git history.
 
 ---
 
@@ -236,16 +278,3 @@ or run `ops tapcheck` afterwards and restart it.
 
 The ISO must be somewhere QEMU can read — `/var/lib/libvirt/isos/` rather than
 your home directory, which is not traversable by `libvirt-qemu`.
-
----
-
-## What is not in this repo
-
-Firewall rules, VLAN definitions, Kea DHCP and aliases live inside OPNsense.
-They are backed up by `~/python/opnwatch`, which fetches the config daily and
-reports which sections changed.
-
-Pi-hole is deployed by `~/ansible/lab/pihole.yml`.
-
-Nothing here is reproducible on Windows: the libvirt provider and netplan are
-both Linux-only.
