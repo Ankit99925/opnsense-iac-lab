@@ -10,7 +10,7 @@ afterwards by the Terraform stack in policy/.
 Deterministic: the same inputs always give byte-identical output, so the boot
 hook only reloads the firewall when something actually changed.
 """
-import base64, hashlib, os, subprocess, sys, uuid
+import base64, hashlib, json, os, subprocess, sys, uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -20,19 +20,16 @@ SECRETS = Path(os.environ.get("SECRETS_DIR", Path.home() / ".config/opnsense-iac
 SSH_PUB = Path(os.environ.get("SSH_PUB", Path.home() / ".ssh/id_ed25519.pub"))
 OUT     = Path(os.environ.get("BASELINE_OUT", Path.home() / ".cache/opnsense-iac-lab/baseline.xml"))
 
-MGMT_HOST = "192.168.122.1"   # mera-server, on libvirt's default network
-WAN_DEV   = "vtnet0"
-TRUNK     = "vtnet3"
-# The lab's zones: OPNsense's internal name, device, description, address, prefix
-ZONES = [
-    ("lan",  "vtnet1", "SERVERS", "192.168.100.1", 24),
-    ("opt2", "vtnet2", "CLIENTS", "192.168.200.1", 24),
-    ("opt3", "vlan01", "VLAN10",  "10.20.10.1",    24),
-    ("opt4", "vlan02", "VLAN20",  "10.20.20.1",    24),
-    ("opt5", "vlan03", "VLAN30",  "10.20.30.1",    24),
-]
+# The network's shape comes from network.json, shared with the policy/ stack.
+NET       = json.loads((REPO / "network.json").read_text())
+MGMT_HOST = NET["mgmt_host"]       # mera-server, on libvirt's default network
+WAN_DEV   = NET["wan_device"]
+TRUNK     = NET["trunk_device"]
+# zones: OPNsense's internal name, device, description, address, prefix
+ZONES = [(z["key"], z["device"], z["name"], z["gateway"], int(z["subnet"].split("/")[1]))
+         for z in NET["zones"]]
 # VLAN devices on the trunk: device, 802.1Q tag, description
-VLANS = [("vlan01", 10, "VLAN10"), ("vlan02", 20, "VLAN20"), ("vlan03", 30, "VLAN30")]
+VLANS = [(z["device"], z["vlan_tag"], z["name"]) for z in NET["zones"] if "vlan_tag" in z]
 
 NS = uuid.UUID("3f6c1c1e-6d8e-4c7a-9a55-0b2a6f1d0c01")   # fixed, so every ID is stable
 def uid(name): return str(uuid.uuid5(NS, name))
