@@ -52,6 +52,7 @@ resource "libvirt_volume" "opnsense" {
 resource "libvirt_domain" "opnsense" {
   name        = "opnsense"
   autostart   = true
+  running     = true
   type        = "kvm"
   memory      = 1536
   memory_unit = "MiB"
@@ -188,6 +189,7 @@ resource "libvirt_volume" "server" {
 resource "libvirt_domain" "server" {
   name        = "ubuntu-server"
   autostart   = true
+  running     = true
   type        = "kvm"
   memory      = 1
   memory_unit = "GiB"
@@ -291,6 +293,10 @@ resource "libvirt_cloudinit_disk" "vlantest" {
         passwd: ${var.console_password_hash}
         ssh_authorized_keys:
           - ${trimspace(file(pathexpand(var.ssh_key_path)))}
+    packages:
+      - qemu-guest-agent
+    runcmd:
+      - [systemctl, start, qemu-guest-agent]
   EOT
 
   network_config = <<-EOT
@@ -312,6 +318,7 @@ resource "libvirt_cloudinit_disk" "vlantest" {
 resource "libvirt_domain" "vlantest" {
   name        = "vlantest"
   autostart   = true
+  running     = true
   type        = "kvm"
   memory      = 512
   memory_unit = "MiB"
@@ -331,6 +338,13 @@ resource "libvirt_domain" "vlantest" {
   cpu = { mode = "host-passthrough" }
 
   devices = {
+    # QEMU guest agent: lets the host run commands inside vlantest
+    # without any network path (used by smoke.sh layer 6).
+    channels = [{
+      source = { unix = {} }
+      target = { virt_io = { name = "org.qemu.guest_agent.0" } }
+    }]
+
     disks = [
       {
         device = "disk"
