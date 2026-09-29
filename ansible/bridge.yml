@@ -1,0 +1,25 @@
+# Changing these bridges makes `netplan apply` restart NetworkManager,
+# which rebuilds br-clients and br-trunk and unplugs any VM attached to
+# them. Stop OPNsense first, or run ops tapcheck afterwards and restart it.
+
+- hosts: host
+  become: true
+  tasks:
+    - name: Install lab bridges netplan config
+      ansible.builtin.template:
+        src: 99-lab-bridges.yaml.j2
+        dest: /etc/netplan/99-lab-bridges.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      notify: apply netplan
+
+    - name: Remove old single-bridge config
+      ansible.builtin.file:
+        path: /etc/netplan/99-br-clients.yaml
+        state: absent
+      notify: apply netplan
+
+  handlers:
+    - name: apply netplan
+      ansible.builtin.command: netplan apply

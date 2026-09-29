@@ -1,0 +1,16 @@
+services:
+  pihole:
+    image: pihole/pihole:{{ pihole_version }}
+    container_name: pihole
+    restart: unless-stopped
+    environment:
+      TZ: "{{ pihole_tz }}"
+      FTLCONF_dns_listeningMode: "all"
+      FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
+    ports:
+      - "{{ ansible_host }}:53:53/tcp"
+      - "{{ ansible_host }}:53:53/udp"
+      - "{{ ansible_host }}:80:80/tcp"
+    volumes:
+      - /srv/docker/pihole/etc-pihole:/etc/pihole
+      - /srv/docker/pihole/etc-dnsmasq.d:/etc/dnsmasq.d

@@ -1,0 +1,19 @@
+network:
+  version: 2
+  ethernets:
+    {{ usb_nic }}:
+      dhcp4: false
+  bridges:
+{% for b in bridges %}
+    {{ b.name }}:
+      interfaces: [{{ b.nics | join(', ') }}]
+      dhcp4: false
+      link-local: []
+      accept-ra: false
+      networkmanager:
+        passthrough:
+          ipv4.method: "disabled"
+          ipv6.method: "disabled"
+      parameters:
+        stp: false
+{% endfor %}

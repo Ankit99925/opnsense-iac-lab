@@ -1,0 +1,28 @@
+- hosts: servers
+  become: true
+  tasks:
+    - name: Install Docker and the compose plugin
+      ansible.builtin.apt:
+        name: [docker.io, docker-compose-v2]
+        state: present
+        update_cache: true
+
+    - name: Create Pi-hole data directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /srv/docker/pihole/etc-pihole
+        - /srv/docker/pihole/etc-dnsmasq.d
+
+    - name: Write compose file
+      ansible.builtin.template:
+        src: pihole-compose.yml.j2
+        dest: /srv/docker/pihole/compose.yml
+        mode: "0600"
+
+    - name: Start Pi-hole
+      community.docker.docker_compose_v2:
+        project_src: /srv/docker/pihole
+        state: present
