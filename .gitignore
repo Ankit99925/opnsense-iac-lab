@@ -1,0 +1,19 @@
+# --- Terraform: state holds the OPNsense config and password hashes
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
+
+# --- Secrets and big files (REBUILD.md: "Files that are NOT in git")
+creds.env
+*.env
+config-OPNsense-*.xml
+*.qcow2
+*.iso
+
+# --- Logs
+*.log
