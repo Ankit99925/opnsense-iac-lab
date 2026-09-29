@@ -8,10 +8,14 @@
 # Needs the files listed in REBUILD.md under "Files that are NOT in git".
 set -euo pipefail
 
-LAB_DIR="${LAB_DIR:-$HOME/terraform/lab}"
-ANSIBLE_DIR="${ANSIBLE_DIR:-$HOME/ansible/lab}"
+# Everything in the repo is found relative to this script,
+# so the repo works wherever it is cloned.
+REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+TF_DIR="$REPO_DIR/terraform"
+ANSIBLE_DIR="$REPO_DIR/ansible"
+# Outside the repo, never in git: backups and API credentials.
 BACKUP_DIR="${BACKUP_DIR:-$HOME/lab-backup}"
-CREDS="${CREDS:-$HOME/python/opnwatch/creds.env}"
+CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/creds.env}"
 GOLDEN="opnsense-26.1-golden-v2.qcow2"
 SERVER_IP=192.168.100.10
 # The libvirt provider writes cloud-init ISOs to $TMPDIR; /tmp is tmpfs here.
@@ -57,7 +61,7 @@ virsh vol-info --pool default "$GOLDEN" >/dev/null 2>&1 \
   || die "golden image $GOLDEN not in pool 'default' (REBUILD.md: Building the OPNsense image)"
 [ -r "$BACKUP_DIR/config-OPNsense-latest.xml" ]   || die "no config backup at $BACKUP_DIR/config-OPNsense-latest.xml"
 [ -r "$CREDS" ]                                   || die "missing $CREDS"
-[ -r "$LAB_DIR/terraform.tfvars" ]                || die "missing $LAB_DIR/terraform.tfvars"
+[ -r "$TF_DIR/terraform.tfvars" ]                || die "missing $TF_DIR/terraform.tfvars"
 [ -r "$ANSIBLE_DIR/host_vars/localhost.yml" ]     || die "missing host_vars/localhost.yml (USB adapter name)"
 [ -r "$ANSIBLE_DIR/host_vars/ubuntu-server.yml" ] || die "missing host_vars/ubuntu-server.yml (Pi-hole password)"
 [ -r "$HOME/.ssh/id_ed25519" ]                    || die "missing SSH key ~/.ssh/id_ed25519"
@@ -110,12 +114,12 @@ if (( FRESH )); then
     [ "$ans" = destroy ] || die "aborted"
   fi
   # The golden image is not managed by Terraform, so destroy never touches it.
-  ( cd "$LAB_DIR" && terraform destroy -input=false -auto-approve )
+  ( cd "$TF_DIR" && terraform destroy -input=false -auto-approve )
 fi
 
 # ------------------------------------------------------------------ terraform
 step "Terraform (networks and VMs; VMs start themselves)"
-cd "$LAB_DIR"
+cd "$TF_DIR"
 terraform init -input=false >/dev/null
 terraform plan -input=false -out=rebuild.tfplan
 terraform apply -input=false rebuild.tfplan
@@ -143,6 +147,6 @@ ansible-playbook -i inventory.ini pihole.yml
 
 # ---------------------------------------------------------------------- smoke
 step "Smoke tests"
-TRIES=60 "$LAB_DIR/scripts/smoke.sh"
+TRIES=60 "$REPO_DIR/scripts/smoke.sh"
 
 printf '\n\033[32mLab rebuilt and verified.\033[0m\n'

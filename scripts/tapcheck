@@ -1,0 +1,31 @@
+#!/bin/bash
+# tapcheck: verify every running VM's virtual NICs are plugged into
+# the bridge libvirt expects. Exits 1 and names any that are not.
+set -euo pipefail
+
+failed=0
+
+while read -r dom; do
+    [[ -z "$dom" ]] && continue
+
+    while read -r iface type source _; do
+        [[ -z "$iface" ]] && continue
+
+        if [[ "$type" == "network" ]]; then
+            want=$(virsh net-info "$source" | awk '/^Bridge:/ {print $2}')
+        else
+            want="$source"
+        fi
+
+        link=$(readlink "/sys/class/net/$iface/master" || true)
+        have=${link##*/}
+
+        if [[ "$have" != "$want" ]]; then
+            echo "UNPLUGGED: $dom $iface should be on $want, is on ${have:-nothing}" >&2
+            failed=1
+        fi
+    done < <(virsh domiflist "$dom" | tail -n +3)
+
+done < <(virsh list --name)
+
+exit "$failed"

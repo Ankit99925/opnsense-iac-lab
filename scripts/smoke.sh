@@ -4,9 +4,12 @@
 # TRIES=1 ./smoke.sh   -> no retries (fast, for a lab that is already up)
 set -uo pipefail
 
-ANSIBLE_DIR="${ANSIBLE_DIR:-$HOME/ansible/lab}"
-CREDS="${CREDS:-$HOME/python/opnwatch/creds.env}"
-TAPCHECK="${TAPCHECK:-$HOME/ops/libexec/tapcheck}"
+# Everything in the repo is found relative to this script,
+# so the repo works wherever it is cloned.
+REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+ANSIBLE_DIR="$REPO_DIR/ansible"
+CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/creds.env}"
+TAPCHECK="$REPO_DIR/scripts/tapcheck"
 SERVER_IP=192.168.100.10
 VLANTEST_NET=10.20.10.   # vlantest's VLAN in the code (cloud-init: VLAN 10)
 TRIES="${TRIES:-24}"     # 24 tries x 5 s = up to 2 minutes per check
