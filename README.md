@@ -30,12 +30,14 @@ flowchart TB
 
 | Piece | Tool | Job |
 |---|---|---|
+| Network description | `network.json` | Zones, addresses, DHCP pools, VLAN tags: written once, read by everything below |
 | Host networking | Ansible | Linux bridges for CLIENTS and the VLAN trunk (netplan) |
-| Networks and VMs | Terraform (libvirt provider) | NAT and isolated networks, three VMs, cloud-init, autostart |
-| Firewall | Golden image + boot hook | Installed OPNsense image; its config is loaded at boot from an ISO |
+| Networks and VMs | Terraform (`terraform/`, libvirt provider) | NAT and isolated networks, three VMs, cloud-init, autostart |
+| Firewall, Day 0 | Golden image + generated baseline | Installed OPNsense image; `render-baseline.py` builds its config (interfaces, VLANs, users, API key, certificate) and a boot hook loads it |
+| Firewall, Day 1 | Terraform (`policy/`, OPNsense provider) | Aliases, 28 firewall rules and Kea subnets, pushed through the API |
 | Services | Ansible | Pi-hole in Docker on the Ubuntu server |
-| Orchestration | Bash | `scripts/rebuild.sh`: preflight, backup, build, wait, configure, test |
-| Verification | Bash + QEMU guest agent | `scripts/smoke.sh`: six layers, host to firewall rules |
+| Orchestration | Bash | `scripts/rebuild.sh`: preflight, secrets, baseline, build, policy, configure, test |
+| Verification | Bash + QEMU guest agent | `scripts/smoke.sh`: six layers, host to firewall rules, plus a drift check |
 
 `rebuild.sh` has two modes: **converge** (default: build what is missing, fix drift, safe to
 rerun after a failure) and **`--fresh`** (destroy everything, then build from nothing).
@@ -43,24 +45,37 @@ rerun after a failure) and **`--fresh`** (destroy everything, then build from no
 ## What the smoke tests prove
 
 1. **Host:** bridges up, all VMs running, every VM NIC on the right bridge
-2. **OPNsense:** its API answers, so the config (and API key) was loaded
+2. **OPNsense:** its API answers with the automation key (so the baseline loaded), and
+   `terraform plan` in `policy/` shows no changes (**the firewall matches the code exactly**)
 3. **Routing:** the host reaches SERVERS through the firewall
 4. **Services:** Pi-hole answers DNS; the server reaches the internet through NAT
 5. **VLANs:** Kea leased vlantest an address on VLAN 10 (trunk, tagging, DHCP)
-6. **Firewall rules:** from *inside* VLAN 10, the internet is reachable (positive control)
-   but the gateway is not (block rule), run through the QEMU guest agent so the test
-   needs no network path into the isolated VLAN
+6. **Firewall rules,** from *inside* VLAN 10 through the QEMU guest agent, so the test needs
+   no network path into the isolated VLAN. Every block is paired with a positive control:
+   internet works but the gateway is unreachable; DNS via Pi-hole works but `8.8.8.8` gets no
+   reply; TCP 443 out works but DNS-over-TLS (853) is blocked
 
 ## Design decisions
 
-- **Image and config are separate.** The golden image holds only an installed OPNsense plus a
-  small boot hook. The config arrives on an ISO built by Terraform; the hook loads it once
-  (checksum marker, one reboot) and leaves later GUI changes alone. A rule change never
-  needs a new image.
+- **Firewall as code, in two layers.** A small **baseline** holds only what OPNsense's API
+  cannot do (interfaces, VLANs, users, API key, certificate); it is generated from OPNsense's
+  own factory config plus `network.json`, and loaded at boot by a hook in the golden image.
+  The **policy** (aliases, rules, Kea subnets) is Terraform code pushed through the API. The
+  same pattern vendors use: a bootstrap config, then policy from a source of truth.
+- **One description of the network.** `network.json` feeds both the baseline generator and
+  the policy stack. Client zones share one six-rule pattern, so a new VLAN is one line.
+- **Deterministic generation.** Secrets are created once and reused; IDs are derived from
+  names. The same inputs give a byte-identical baseline, so the firewall only reloads when
+  something actually changed.
+- **Least privilege for automation.** Root has no API key; a separate `automation` user does.
+  SSH to the firewall is key-only, with lockout on.
+- **Moving from restore to code exposed real problems.** The old restored config carried dead
+  settings (an old server's DHCP reservation), WireGuard that could never work behind CGNAT, a
+  CLIENTS zone that could reach the hypervisor, and VLANs told to use an NTP server they were
+  blocked from. The code-built firewall has none of them, and DNS is now forced through Pi-hole.
 - **Backups are checked, not trusted.** OPNsense's backup API serves the newest entry in its
-  configuration *history*, which right after a rebuild is the factory config. A `--fresh`
-  run once loaded that and came up blank. The backup step now rejects anything that does
-  not look like this lab's config.
+  configuration *history*; after a rebuild that was once the factory config, and a rebuild
+  loaded it. Backups are now only a safety net, and the backup step rejects factory configs.
 - **Hand-built things were brought under code.** libvirt's `default` network (DHCP
   reservation and route) was imported into Terraform; a provider gap forced a planned
   one-time replacement.
@@ -68,43 +83,45 @@ rerun after a failure) and **`--fresh`** (destroy everything, then build from no
   which is tmpfs on this host; VMs attach copies in the storage pool, and a Terraform
   `check` block warns if an ISO ever lands in `/tmp`.
 - **VMs are cattle.** Drift inside a VM (a hand edit moved vlantest to another VLAN) is fixed
-  by rebuilding it from code, not by editing it back. The smoke tests caught that drift.
-- **Secrets stay out of git.** State, tfvars, host variables, config backups and API
-  credentials are gitignored or live outside the repo; history is scanned with gitleaks.
+  by rebuilding it from code. The smoke tests caught that drift.
+- **Secrets stay out of git.** State, tfvars, host variables, generated secrets and the
+  rendered baseline are gitignored or live outside the repo; history is scanned with gitleaks.
 
 ## Prerequisites
 
 - **A Linux host.** The libvirt provider and netplan are Linux-only; built and tested on
   Ubuntu Server 26.04, x86-64 with hardware virtualization, 12 GB RAM or more.
 - **Host tools:** libvirt/QEMU, Terraform, Ansible (with the `community.libvirt`,
-  `community.general` and `community.docker` collections), curl, dig, Python 3.
+  `community.general` and `community.docker` collections), curl, dig, Python 3, Perl, OpenSSL.
   *(Next: `bootstrap.sh` installs them.)*
 - **For the CLIENTS zone:** a USB Ethernet adapter and a Wi-Fi access point.
 - **Files kept out of git on purpose.** The repo holds the code, not the data it builds with:
   - the OPNsense **golden image**: too big for git; built once (see REBUILD.md)
-  - the OPNsense **config backup**: firewall rules, VLANs, Kea DHCP and aliases live inside
-    OPNsense, not in this repo. The backup holds password hashes and the API key.
-    (opnwatch, a separate monitoring project, also fetches it daily and reports changed sections.)
-  - **machine-specific values and secrets:** `terraform.tfvars`, the Ansible `host_vars`,
-    the API credentials, an SSH key
+  - **machine-specific values:** `terraform.tfvars`, the Ansible `host_vars`, an SSH key
+  - **lab secrets** (root password, API key, certificate): generated on the first run by
+    `scripts/gen-secrets.sh` into `~/.config/opnsense-iac-lab/`
 
-Exact paths, where each file comes from, and the full rebuild procedure:
-**[REBUILD.md](REBUILD.md)**.
+No OPNsense config backup is needed: the firewall is built from code.
+Exact paths and the full rebuild procedure: **[REBUILD.md](REBUILD.md)**.
 
 ## Limitations and next steps
 
-- The golden image is built by hand (next: Packer).
+- The golden image is built by hand (next: Packer, with a unique root password).
 - Tools are installed by hand on the host (next: `bootstrap.sh`, proven on a fresh Ubuntu VM).
+- Interface assignment stays in the baseline: OPNsense's API does not cover it.
 - Terraform state is a local file (fine for one person; teams use a remote backend).
-- Later: generate the variables from a CSV parameter sheet; trigger rebuilds from CI.
+- Later: a read-only API key for monitoring; generate `network.json` from a CSV parameter
+  sheet; trigger rebuilds from CI.
 
 ## Repo layout
 
 ```
+network.json      the network's shape: zones, addresses, pools, VLAN tags
 terraform/        networks, VMs, cloud-init, config ISO, guards
+policy/           OPNsense aliases, firewall rules, Kea subnets (through the API)
 ansible/          host bridges, Pi-hole
-scripts/          rebuild.sh, smoke.sh, tapcheck
-opnsense-image/   boot hook baked into the golden image
+scripts/          rebuild.sh, smoke.sh, tapcheck, gen-secrets.sh, render-baseline.py
+opnsense-image/   boot hook, OPNsense factory config (secrets removed)
 REBUILD.md        runbook: rebuild from scratch, gotchas, automation status
 ```
 
@@ -167,16 +184,18 @@ Four bridges exist on the host, created by three different things.
 
 | Piece | Managed by |
 |-------|------------|
-| `default` network, incl. OPNsense's DHCP reservation and the host route to SERVERS | Terraform |
-| SERVERS network, all VMs, volumes, cloud-init and config ISOs | Terraform |
+| Zones, addresses, pools, VLAN tags | `network.json` |
+| `default` network, incl. OPNsense's DHCP reservation and the host route to SERVERS | Terraform (`terraform/`) |
+| SERVERS network, all VMs, volumes, cloud-init and config ISOs | Terraform (`terraform/`) |
 | `br-clients`, `br-trunk` | Ansible |
 | Pi-hole | Ansible |
 | OPNsense installed system and boot hook | Golden image (built by hand, see REBUILD.md) |
-| Firewall rules, VLANs, Kea DHCP, API key | OPNsense config backup, loaded at boot by the hook |
+| OPNsense interfaces, VLAN devices, users, API key, certificate, SSH, Kea on/off | Baseline, generated by `scripts/render-baseline.py` |
+| Firewall aliases, rules, Kea subnets | Terraform (`policy/`), through the API |
 
 Terraform refers to `br-clients` and `br-trunk` by name only; it does not create them.
-`scripts/smoke.sh` checks both bridges are up, and `scripts/tapcheck` checks every VM
-network card is attached to the bridge it should be.
+`scripts/smoke.sh` checks both bridges are up, `scripts/tapcheck` checks every VM network card
+is attached to the bridge it should be, and the drift check confirms the firewall matches `policy/`.
 
 ---
 
@@ -189,27 +208,27 @@ One command, from the repo root:
 
 It runs, in order:
 
-1. **Preflight:** tools, golden image, config backup, credentials
-2. **Config backup** from OPNsense's API, accepted only if it looks like this lab's config
-3. **Ansible** creates the bridges. VMs attach to them, and a VM cannot start if its bridge does not exist.
-4. **Terraform** creates the networks, the VMs and their disks; the VMs start themselves
-5. **OPNsense** boots the golden image; the boot hook loads the config from its ISO and reboots once
-6. **Ubuntu server:** wait for SSH, refresh its host key, wait for cloud-init
-7. **Ansible** deploys Pi-hole
-8. **Smoke tests,** all six layers
+1. **Preflight:** tools, golden image, host files
+2. **Secrets and baseline:** create missing secrets; render the baseline config
+3. **Config backup** from OPNsense's API (safety net only)
+4. **Ansible** creates the bridges. VMs attach to them, and a VM cannot start if its bridge does not exist.
+5. **Terraform** (`terraform/`) creates the networks, the VMs and their disks; the VMs start themselves
+6. **OPNsense** boots the golden image; the boot hook loads the baseline and reboots once
+7. **Terraform** (`policy/`) pushes aliases, rules and Kea subnets through the API
+8. **Ubuntu server:** wait for SSH, refresh its host key, wait for cloud-init
+9. **Ansible** deploys Pi-hole
+10. **Smoke tests,** all six layers
 
 Details, failure recovery and the files that are not in git: [REBUILD.md](REBUILD.md).
 
 ## What is still done by hand
 
 - **Building the golden image,** rarely: a new OPNsense version or a hook change. Steps in REBUILD.md.
-- **Changing firewall rules, VLANs or Kea** in the OPNsense GUI, then taking a backup.
-  The backup, not the running firewall, is what a rebuild uses.
-- **Creating the OPNsense API key,** once. It then lives in the config backup and in
-  `~/.config/opnsense-iac-lab/creds.env`.
 - **Installing the host's tools** (next: `bootstrap.sh`).
+- **Restoring the non-git files** onto a new machine (golden image, tfvars, host_vars, SSH key, lab secrets).
 
-The earlier manual install and restore instructions are in this repo's git history.
+Firewall changes are **not** done by hand any more: edit `policy/` or `network.json`, run
+`rebuild.sh`, check the smoke tests.
 
 ---
 
