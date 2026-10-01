@@ -17,3 +17,7 @@ config-OPNsense-*.xml
 
 # --- Logs
 *.log
+
+# --- Python
+__pycache__/
+*.pyc
