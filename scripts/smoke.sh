@@ -8,7 +8,8 @@ set -uo pipefail
 # so the repo works wherever it is cloned.
 REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 ANSIBLE_DIR="$REPO_DIR/ansible"
-CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/creds.env}"
+POLICY_DIR="$REPO_DIR/policy"
+CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/api.env}"   # automation user
 TAPCHECK="$REPO_DIR/scripts/tapcheck"
 SERVER_IP=192.168.100.10
 VLANTEST_NET=10.20.10.   # vlantest's VLAN in the code (cloud-init: VLAN 10)
@@ -61,6 +62,15 @@ t_agent()      { virsh qemu-agent-command vlantest '{"execute":"guest-ping"}'; }
 t_vlan_out()   { guest_run /usr/bin/ping -c 2 -W 2 8.8.8.8; }                    # must work
 t_gw_blocked() { guest_run /usr/bin/ping -c 2 -W 2 10.20.10.1; [ $? -eq 1 ]; }   # ping exit 1 = no replies
 
+# firewall matches policy/ exactly: plan exit code 0 = no changes, 2 = drift, 1 = error
+t_policy() { (cd "$POLICY_DIR" && OPNSENSE_API_KEY="$OPN_KEY" OPNSENSE_API_SECRET="$OPN_SECRET" \
+               terraform plan -input=false -lock=false -detailed-exitcode); }
+# DNS enforcement, from inside vlantest; each block test has a positive control
+t_dns_pihole()        { guest_run /usr/bin/dig +short +time=2 +tries=1 "@$SERVER_IP" example.com; }
+t_dns_other_blocked() { guest_run /usr/bin/dig +time=2 +tries=1 @8.8.8.8 example.com; [ $? -eq 9 ]; }  # 9 = no reply
+t_https_ok()          { guest_run /usr/bin/nc -z -w 3 1.1.1.1 443; }
+t_dot_blocked()       { guest_run /usr/bin/nc -z -w 3 1.1.1.1 853; [ $? -eq 1 ]; }                 # 1 = no connection
+
 # --- run them, bottom layer first ------------------------------------------
 layer "1 host"
 check "bridges br-clients and br-trunk are UP"           t_bridges
@@ -69,6 +79,7 @@ check "every VM NIC on the right bridge (tapcheck)"      "$TAPCHECK"
 
 layer "2 OPNsense"
 check "API returns 200 (config and API key loaded)"      t_api
+check "firewall policy matches the code (terraform plan)"  t_policy
 
 layer "3 routing"
 check "host route to SERVERS via OPNsense WAN"           t_route
@@ -85,5 +96,9 @@ layer "6 firewall rules (from inside vlantest, via the guest agent)"
 check "guest agent in vlantest answers"                  t_agent
 check "vlantest reaches the internet (positive control)" t_vlan_out
 check "vlantest cannot ping its gateway (block rule)"    t_gw_blocked
+check "DNS via Pi-hole works (positive control)"          t_dns_pihole
+check "DNS to anywhere else is blocked (8.8.8.8)"         t_dns_other_blocked
+check "HTTPS out works (positive control for port tests)" t_https_ok
+check "DNS-over-TLS is blocked (port 853)"                t_dot_blocked
 
 echo "All smoke tests passed."
