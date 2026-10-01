@@ -295,6 +295,7 @@ resource "libvirt_cloudinit_disk" "vlantest" {
           - ${trimspace(file(pathexpand(var.ssh_key_path)))}
     packages:
       - qemu-guest-agent
+      - bind9-dnsutils   # dig, for the smoke tests' DNS checks
     runcmd:
       - [systemctl, start, qemu-guest-agent]
   EOT

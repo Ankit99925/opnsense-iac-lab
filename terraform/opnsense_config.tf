@@ -1,6 +1,6 @@
 variable "opnsense_config_xml" {
-  description = "Unencrypted OPNsense config backup, loaded at boot by the golden image's hook"
-  default     = "~/lab-backup/config-OPNsense-latest.xml"
+  description = "Baseline config.xml from scripts/render-baseline.py, loaded at boot by the golden image's hook"
+  default     = "~/.cache/opnsense-iac-lab/baseline.xml"
 }
 
 # Config ISO for OPNsense. The boot hook in the golden image
