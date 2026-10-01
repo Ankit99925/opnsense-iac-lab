@@ -13,9 +13,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 TF_DIR="$REPO_DIR/terraform"
 ANSIBLE_DIR="$REPO_DIR/ansible"
+POLICY_DIR="$REPO_DIR/policy"
 # Outside the repo, never in git: backups and API credentials.
 BACKUP_DIR="${BACKUP_DIR:-$HOME/lab-backup}"
-CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/creds.env}"
+CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/api.env}"   # automation user, made by gen-secrets.sh
 GOLDEN="opnsense-26.1-golden-v2.qcow2"
 SERVER_IP=192.168.100.10
 # The libvirt provider writes cloud-init ISOs to $TMPDIR; /tmp is tmpfs here.
@@ -52,22 +53,29 @@ api_up() {
 
 # ------------------------------------------------------------------ preflight
 step "Preflight"
-for c in virsh terraform ansible ansible-playbook curl dig python3 ssh-keyscan; do
+for c in virsh terraform ansible ansible-playbook curl dig python3 perl openssl ssh-keyscan; do
   command -v "$c" >/dev/null || die "missing command: $c (see bootstrap in REBUILD.md)"
 done
 virsh uri >/dev/null 2>&1 || die "cannot talk to libvirt (are you in the libvirt group?)"
 virsh pool-refresh default >/dev/null 2>&1 || die "libvirt storage pool 'default' not found"
 virsh vol-info --pool default "$GOLDEN" >/dev/null 2>&1 \
   || die "golden image $GOLDEN not in pool 'default' (REBUILD.md: Building the OPNsense image)"
-[ -r "$BACKUP_DIR/config-OPNsense-latest.xml" ]   || die "no config backup at $BACKUP_DIR/config-OPNsense-latest.xml"
-[ -r "$CREDS" ]                                   || die "missing $CREDS"
 [ -r "$TF_DIR/terraform.tfvars" ]                || die "missing $TF_DIR/terraform.tfvars"
 [ -r "$ANSIBLE_DIR/host_vars/localhost.yml" ]     || die "missing host_vars/localhost.yml (USB adapter name)"
 [ -r "$ANSIBLE_DIR/host_vars/ubuntu-server.yml" ] || die "missing host_vars/ubuntu-server.yml (Pi-hole password)"
 [ -r "$HOME/.ssh/id_ed25519" ]                    || die "missing SSH key ~/.ssh/id_ed25519"
+[ -r "$REPO_DIR/network.json" ]                  || die "missing network.json in the repo"
+[ -r "$HOME/.ssh/id_ed25519.pub" ]               || die "missing SSH public key ~/.ssh/id_ed25519.pub"
 mkdir -p "$TMPDIR" && chmod 700 "$TMPDIR"
+echo "  ok: tools, libvirt, golden image, host files"
+
+# ------------------------------------------------------- secrets and baseline
+step "Secrets and baseline config"
+# Secrets are created once and kept; the baseline is re-rendered every run but
+# is byte-identical unless an input changed, so OPNsense only reloads on a real change.
+"$REPO_DIR/scripts/gen-secrets.sh"
+"$REPO_DIR/scripts/render-baseline.py"
 source "$CREDS"
-echo "  ok: tools, libvirt, golden image, config backup, credentials"
 
 # -------------------------------------------------------------- config backup
 step "OPNsense config backup"
@@ -98,7 +106,7 @@ if api_up; then
     echo "  ok: saved $(basename "$out"), now 'latest'"
   fi
 else
-  echo "  OPNsense not reachable: using existing $(readlink "$latest")"
+  echo "  OPNsense API not answering with this key: no backup taken (backups are only a safety net)"
 fi
 
 # --------------------------------------------------------------- host bridges
@@ -115,6 +123,9 @@ if (( FRESH )); then
   fi
   # The golden image is not managed by Terraform, so destroy never touches it.
   ( cd "$TF_DIR" && terraform destroy -input=false -auto-approve )
+  # policy/'s state describes rules inside the firewall that was just destroyed.
+  # Forget it, so the new firewall gets its policy created from scratch.
+  rm -f "$POLICY_DIR/terraform.tfstate" "$POLICY_DIR/terraform.tfstate.backup"
 fi
 
 # ------------------------------------------------------------------ terraform
@@ -128,6 +139,15 @@ rm -f rebuild.tfplan
 # ------------------------------------------------------------------- OPNsense
 step "Waiting for OPNsense (boot, config load, one reboot)"
 wait_for "OPNsense API answers with the lab config" 600 api_up
+
+# ------------------------------------------------------------------- policy
+step "Firewall policy (Terraform, policy/)"
+export OPNSENSE_API_KEY="$OPN_KEY" OPNSENSE_API_SECRET="$OPN_SECRET"
+cd "$POLICY_DIR"
+terraform init -input=false >/dev/null
+terraform plan -input=false -out=rebuild.tfplan
+terraform apply -input=false rebuild.tfplan
+rm -f rebuild.tfplan
 
 # -------------------------------------------------------------- ubuntu server
 step "Ubuntu server"
