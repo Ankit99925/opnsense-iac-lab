@@ -8,6 +8,8 @@
 #   lab-in-vm.sh up        create a FRESH VM (asks before replacing an existing one), wait for SSH
 #   lab-in-vm.sh ssh       open a shell in the VM (or: lab-in-vm.sh ssh <command>)
 #   lab-in-vm.sh status    show the VM, its address and its network
+#   lab-in-vm.sh vnc       watch a build's screen (Packer, port 5901): tunnel + KRDC
+#   lab-in-vm.sh vnc stop  close that tunnel
 #   lab-in-vm.sh destroy   delete the VM and its disks (keeps the cached image and network)
 #
 # Only ever deletes a VM it created itself (it labels them); other VMs are never touched.
@@ -213,6 +215,30 @@ wait_ssh() {
   echo "  ok: ubuntu@$ip, cloud-init finished"
 }
 
+# Packer shows its build VM's screen on 127.0.0.1:5901 inside the lab VM; tunnel it here.
+VNC_PORT=5901
+vnc() {
+  local pattern="-L $VNC_PORT:127.0.0.1:$VNC_PORT"
+  if [ "${1:-}" = stop ]; then
+    pkill -f -- "$pattern" && echo "tunnel closed" || echo "no tunnel was open"
+    return 0
+  fi
+  if [ -z "$(ss -ltnH "sport = :$VNC_PORT")" ]; then
+    local ip
+    ip=$(vm_ip)
+    [ -n "$ip" ] || die "VM $NAME has no address (is it running? $0 status)"
+    ssh -o UserKnownHostsFile="$KNOWN_HOSTS" -o StrictHostKeyChecking=yes \
+        -o ExitOnForwardFailure=yes -f -N -L "$VNC_PORT:127.0.0.1:$VNC_PORT" "ubuntu@$ip" \
+      || die "could not open the tunnel (is a build running in the VM?)"
+    echo "tunnel open: localhost:$VNC_PORT -> the build's screen"
+  fi
+  if command -v krdc >/dev/null; then
+    krdc "vnc://localhost:$VNC_PORT" >/dev/null 2>&1 &
+  else
+    echo "open a VNC viewer at localhost:$VNC_PORT"
+  fi
+}
+
 status() {
   virsh dominfo "$NAME" 2>/dev/null | grep -E '^(Name|State|Max memory|CPU\(s\))' || echo "no VM $NAME"
   echo "Address:        $(vm_ip || true)"
@@ -227,6 +253,7 @@ case "${1:-}" in
            fi ;;
   ssh)     shift; ssh_vm "$@" ;;
   status)  status ;;
+  vnc)     shift; vnc "$@" ;;
   destroy) confirm delete "Delete it"; destroy_vm; echo "VM and its disks removed (cached image and network kept)" ;;
-  *)       sed -n '2,16p' "$0"; exit 2 ;;
+  *)       sed -n '2,18p' "$0"; exit 2 ;;
 esac
