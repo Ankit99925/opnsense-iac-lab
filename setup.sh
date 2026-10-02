@@ -22,10 +22,9 @@ APT_PACKAGES=(
   xorriso bind9-dnsutils curl git gnupg python3 perl openssl        # scripts, ISOs, smoke tests
   ansible-core                                                      # host bridges, Pi-hole
 )
-# HashiCorp's Linux package signing key (Terraform, Packer). Rotated 2026-09-09; the new
-# fingerprint was checked against https://www.hashicorp.com/trust/security (a different host
-# from the repository) on 2026-10-02. Old key was 798AEC654E5C15428C8E42EEAA16FCBCA621E701.
-HASHICORP_FPR="D55C0D1AC78A8D8126CB631CFC9CA96ACA026560"
+# Pinned versions, checksums and signing keys live in pins.env: one place to update them.
+# shellcheck disable=SC1091
+. "$REPO_DIR/pins.env"
 VIRSH="sudo virsh -c qemu:///system"
 
 check_system() {
@@ -72,7 +71,7 @@ install_hashicorp() {
     if [ "$fpr" != "$HASHICORP_FPR" ]; then
       rm -f "$tmp"
       die "HashiCorp's signing key has an unexpected fingerprint ($fpr); not trusting it.
-  Check https://www.hashicorp.com/trust/security before changing HASHICORP_FPR."
+  Check https://www.hashicorp.com/trust/security before changing HASHICORP_FPR in pins.env."
     fi
     sudo install -m 0644 "$tmp" "$key" && rm -f "$tmp"
     echo "  installed HashiCorp's signing key (fingerprint verified)"

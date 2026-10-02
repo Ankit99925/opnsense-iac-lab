@@ -21,3 +21,6 @@ config-OPNsense-*.xml
 # --- Python
 __pycache__/
 *.pyc
+
+# pins.env holds public checksums and key fingerprints, not secrets
+!pins.env
