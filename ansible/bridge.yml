@@ -5,6 +5,16 @@
 - hosts: host
   become: true
   tasks:
+    # The networkmanager: block in the template is only valid when NetworkManager renders
+    # netplan (desktops, mera-server). Ubuntu Server and cloud images use systemd-networkd,
+    # which rejects it; there, dhcp4/link-local/accept-ra already keep the bridges address-free.
+    - name: Check which services run (is NetworkManager rendering netplan?)
+      ansible.builtin.service_facts:
+
+    - name: Remember whether NetworkManager is in charge
+      ansible.builtin.set_fact:
+        netplan_nm: "{{ ansible_facts.services['NetworkManager.service'] is defined and ansible_facts.services['NetworkManager.service'].state == 'running' }}"
+
     - name: Install lab bridges netplan config
       ansible.builtin.template:
         src: 99-lab-bridges.yaml.j2

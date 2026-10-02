@@ -15,10 +15,12 @@ network:
       dhcp4: false
       link-local: []
       accept-ra: false
+{% if netplan_nm %}
       networkmanager:
         passthrough:
           ipv4.method: "disabled"
           ipv6.method: "disabled"
+{% endif %}
       parameters:
         stp: false
 {% endfor %}
