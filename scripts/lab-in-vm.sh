@@ -6,6 +6,7 @@
 # no sudo, nothing installed on this machine.
 #
 #   lab-in-vm.sh up        create a FRESH VM (asks before replacing an existing one), wait for SSH
+#   lab-in-vm.sh run       the full test: fresh VM, clone the repo from GitHub, run setup.sh
 #   lab-in-vm.sh ssh       open a shell in the VM (or: lab-in-vm.sh ssh <command>)
 #   lab-in-vm.sh status    show the VM, its address and its network
 #   lab-in-vm.sh vnc       watch a build's screen (Packer, port 5901): tunnel + KRDC
@@ -239,6 +240,25 @@ vnc() {
   fi
 }
 
+# The repo as a stranger would clone it: from GitHub over HTTPS (the VM has no GitHub key)
+REPO_DIR_LOCAL="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+repo_url() {
+  local u
+  u=$(git -C "$REPO_DIR_LOCAL" remote get-url origin 2>/dev/null || true)
+  case "$u" in git@github.com:*) u="https://github.com/${u#git@github.com:}" ;; esac
+  echo "${LAB_REPO_URL:-$u}"
+}
+
+run_setup() {
+  local url ref ahead
+  url=$(repo_url); ref="${LAB_REPO_REF:-main}"
+  [ -n "$url" ] || die "can't tell the repo's address; set LAB_REPO_URL"
+  ahead=$(git -C "$REPO_DIR_LOCAL" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+  [ "$ahead" = 0 ] || echo "  WARNING: $ahead local commit(s) not pushed; the VM clones GitHub and won't see them"
+  say "In the VM: git clone $url ($ref), then ./setup.sh (log: ~/setup.log in the VM)"
+  ssh_vm "set -o pipefail; git clone --branch $ref $url opnsense-iac-lab && cd opnsense-iac-lab && time ./setup.sh 2>&1 | tee ~/setup.log"
+}
+
 status() {
   virsh dominfo "$NAME" 2>/dev/null | grep -E '^(Name|State|Max memory|CPU\(s\))' || echo "no VM $NAME"
   echo "Address:        $(vm_ip || true)"
@@ -251,9 +271,11 @@ case "${1:-}" in
            if [ -t 0 ] && [ -t 1 ]; then   # a person at a terminal: go straight in
              echo "Opening a shell in the VM (exit to leave; the VM keeps running)"; ssh_vm
            fi ;;
+  run)     preflight; confirm replace "Replace it with a fresh one"; ensure_network; fetch_base
+           destroy_vm; create_vm; wait_ssh; run_setup ;;
   ssh)     shift; ssh_vm "$@" ;;
   status)  status ;;
   vnc)     shift; vnc "$@" ;;
   destroy) confirm delete "Delete it"; destroy_vm; echo "VM and its disks removed (cached image and network kept)" ;;
-  *)       sed -n '2,18p' "$0"; exit 2 ;;
+  *)       sed -n '2,19p' "$0"; exit 2 ;;
 esac
