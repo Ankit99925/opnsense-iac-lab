@@ -22,7 +22,9 @@ cd "$SECRETS_DIR"
 new() { if [ -e "$1" ]; then echo "  kept:    $1"; return 1; fi; echo "  created: $1"; }
 
 if new root-password; then
-  openssl rand -base64 18 > root-password
+  # lowercase letters and digits only: Packer TYPES this password into the installer,
+  # and characters needing Shift can arrive wrong through VNC (24 chars = ~124 bits)
+  python3 -c 'import secrets, string; a = string.ascii_lowercase + string.digits; print("".join(secrets.choice(a) for _ in range(24)))' > root-password
 fi
 if new root-password.hash; then
   openssl passwd -6 -stdin < root-password > root-password.hash

@@ -80,6 +80,8 @@ source "qemu" "golden" {
   shutdown_timeout = "20m"
 
   boot_wait = "5s"
+  # pause between keystrokes: typing through VNC into a nested VM can drop keys
+  boot_key_interval = "150ms"
   boot_command = [
     # DVD boots to login; its timed prompts (config importer etc.) pass by themselves
     "<wait4m>",
@@ -96,14 +98,15 @@ source "qemu" "golden" {
     "<enter><wait5>",
     # Last chance: No is highlighted; Left to Yes. Install takes ~4 min
     "<left><enter><wait6m>",
-    # Final Configuration: Root Password (asked twice)
+    # Final Configuration: Root Password (asked twice). Applying it takes 5-10 s before
+    # the menu returns; a key sent earlier is lost, so wait 15 s.
     "<enter><wait3>",
     "${var.root_password}<enter><wait3>",
-    "${var.root_password}<enter><wait5>",
+    "${var.root_password}<enter><wait15>",
     # Final Configuration: one Down to Complete Install
     "<down><enter><wait5>",
     # Installation Complete: Reboot now. Installed system boots in ~1-2 min
-    "<enter><wait3m>",
+    "<enter><wait5m>",
     # log in as root, open the shell (menu option 8)
     "root<enter><wait3>",
     "${var.root_password}<enter><wait5>",
