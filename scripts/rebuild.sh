@@ -110,9 +110,11 @@ else
 fi
 
 # --------------------------------------------------------------- host bridges
-step "Host bridges (Ansible; asks for your sudo password)"
+step "Host bridges (Ansible; asks for your sudo password if sudo needs one)"
 # Idempotent: if the bridges already match, nothing changes and running VMs stay plugged in.
-( cd "$ANSIBLE_DIR" && ansible-playbook -i inventory.ini bridge.yml -K )
+# -K asks for the sudo password; skip it when sudo needs none, so unattended runs never hang.
+BECOME=(-K); sudo -n true 2>/dev/null && BECOME=()
+( cd "$ANSIBLE_DIR" && ansible-playbook -i inventory.ini bridge.yml "${BECOME[@]}" )
 
 # -------------------------------------------------------------------- destroy
 if (( FRESH )); then

@@ -1,6 +1,5 @@
-# Copy to terraform.tfvars and set for your machine.
-
-opnsense_iso = "/var/lib/libvirt/isos/OPNsense-26.1-dvd-amd64.iso"
+# setup.sh generates terraform.tfvars on a fresh machine. To write it by hand,
+# copy this file to terraform.tfvars and set the values for your machine.
 
 qemu_uid = "64055"   # id -u libvirt-qemu
 kvm_gid  = "991"     # getent group kvm | cut -d: -f3

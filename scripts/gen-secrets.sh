@@ -5,6 +5,9 @@
 # Output in $SECRETS_DIR (default ~/.config/opnsense-iac-lab), dir 700, files 600:
 #   root-password        OPNsense root password (break-glass console login)
 #   root-password.hash   its SHA-512 crypt hash, written into the baseline config
+#   console-password     break-glass console password for the lab's Ubuntu VMs
+#   console-password.hash  its hash, written into terraform.tfvars by setup.sh
+#   pihole-password      Pi-hole admin password, written into host_vars by setup.sh
 #   api.env              OPN_KEY / OPN_SECRET / OPN_HOST for the automation user
 #   webgui.crt / .key    self-signed certificate for OPNsense's web GUI and API
 set -euo pipefail
@@ -24,6 +27,15 @@ fi
 if new root-password.hash; then
   openssl passwd -6 -stdin < root-password > root-password.hash
 fi
+if new console-password; then
+  openssl rand -base64 18 > console-password
+fi
+if new console-password.hash; then
+  openssl passwd -6 -stdin < console-password > console-password.hash
+fi
+if new pihole-password; then
+  openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > pihole-password
+fi
 if new api.env; then
   # 60 random bytes -> 80 base64 characters, the same length OPNsense uses
   printf 'OPN_KEY=%s\nOPN_SECRET=%s\nOPN_HOST=%s\n' \
@@ -36,4 +48,4 @@ if new webgui.key; then
     -subj "/CN=opnsense-iac-lab" -addext "subjectAltName=IP:$OPN_HOST" \
     -keyout webgui.key -out webgui.crt 2>/dev/null
 fi
-chmod 600 root-password root-password.hash api.env webgui.key webgui.crt
+chmod 600 root-password root-password.hash console-password console-password.hash pihole-password api.env webgui.key webgui.crt
