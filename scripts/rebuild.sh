@@ -36,7 +36,7 @@ for a in "$@"; do
   esac
 done
 
-step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+step() { printf '\n\033[1m== [%s] %s\033[0m\n' "$(date +%T)" "$*"; }
 die()  { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # wait_for "description" max_seconds command...: retry every 5 s until it succeeds
