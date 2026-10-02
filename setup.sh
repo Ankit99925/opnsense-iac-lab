@@ -19,7 +19,7 @@ die()  { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # Everything the lab needs from Ubuntu's own repositories
 APT_PACKAGES=(
   qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients  # VMs
-  xorriso bind9-dnsutils curl git gnupg python3 perl openssl        # scripts, ISOs, smoke tests
+  xorriso bzip2 bind9-dnsutils curl git gnupg python3 perl openssl  # scripts, ISOs, smoke tests
   ansible-core                                                      # host bridges, Pi-hole
 )
 # Pinned versions, checksums and signing keys live in pins.env: one place to update them.
@@ -211,6 +211,54 @@ EOF
   ok "terraform.tfvars and host_vars present (existing files are never changed)"
 }
 
+sha256() { sha256sum "$1" | cut -d' ' -f1; }
+
+# The OPNsense installer ISO, checked against pins.env and cached.
+# LAB_OPNSENSE_ISO may name a local .iso or .iso.bz2 (e.g. a copy from another machine) to
+# skip the slow download. It must pass the same pinned checksums, so it is just as trustworthy.
+OPNSENSE_ISO_DIR="$HOME/.cache/opnsense-iac-lab/iso"
+get_opnsense_iso() {
+  step "OPNsense $OPNSENSE_VERSION installer"
+  local name="OPNsense-$OPNSENSE_VERSION-dvd-amd64.iso" src="${LAB_OPNSENSE_ISO:-}"
+  OPNSENSE_ISO="$OPNSENSE_ISO_DIR/$name"
+  local bz2="$OPNSENSE_ISO.bz2" part="$OPNSENSE_ISO.part"
+  mkdir -p "$OPNSENSE_ISO_DIR"
+
+  if [ -f "$OPNSENSE_ISO" ] && [ "$(sha256 "$OPNSENSE_ISO")" = "$OPNSENSE_ISO_SHA256" ]; then
+    ok "$name (cached, checksum verified)"
+    return 0
+  fi
+
+  if [ -n "$src" ]; then
+    [ -f "$src" ] || die "LAB_OPNSENSE_ISO=$src: no such file"
+    echo "  using a local copy: $src"
+    case "$src" in
+      *.bz2) cp "$src" "$bz2" ;;
+      *)     cp "$src" "$part" ;;
+    esac
+  elif [ ! -f "$bz2" ] || [ "$(sha256 "$bz2")" != "$OPNSENSE_BZ2_SHA256" ]; then
+    echo "  downloading $OPNSENSE_URL (about 470 MB; resumes if interrupted)"
+    curl -fL -C - --progress-bar -o "$bz2" "$OPNSENSE_URL"
+  fi
+
+  if [ -f "$bz2" ]; then
+    if [ "$(sha256 "$bz2")" != "$OPNSENSE_BZ2_SHA256" ]; then
+      rm -f "$bz2"
+      die "$name.bz2 does not match OPNSENSE_BZ2_SHA256 in pins.env (deleted it; run setup.sh again)"
+    fi
+    echo "  decompressing (about 2 GB)"
+    bunzip2 -c "$bz2" > "$part"
+    rm -f "$bz2"
+  fi
+
+  if [ "$(sha256 "$part")" != "$OPNSENSE_ISO_SHA256" ]; then
+    rm -f "$part"
+    die "$name does not match OPNSENSE_ISO_SHA256 in pins.env (deleted it)"
+  fi
+  mv "$part" "$OPNSENSE_ISO"
+  ok "$name (both pinned checksums verified)"
+}
+
 check_system
 # keep sudo's timestamp fresh during long installs; stops when this script ends
 ( while kill -0 "$$" 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
@@ -221,6 +269,7 @@ setup_groups
 setup_libvirt
 setup_user
 setup_machine_values
+get_opnsense_iso
 
 step "Part 1 done"
-echo "  Not written yet: the golden image (Packer), then the lab build."
+echo "  Not written yet: building the golden image (Packer), then the lab build."
