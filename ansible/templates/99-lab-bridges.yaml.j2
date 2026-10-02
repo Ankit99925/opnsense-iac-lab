@@ -1,8 +1,13 @@
 network:
   version: 2
+{% set nics = bridges | map(attribute='nics') | flatten | unique | list %}
+{% if nics %}
   ethernets:
-    {{ usb_nic }}:
+{% for n in nics %}
+    {{ n }}:
       dhcp4: false
+{% endfor %}
+{% endif %}
   bridges:
 {% for b in bridges %}
     {{ b.name }}:
