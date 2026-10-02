@@ -36,7 +36,9 @@ check_system() {
   On another Linux with KVM, run the lab in an Ubuntu VM: scripts/lab-in-vm.sh up"
   fi
   [ -e /dev/kvm ] || die "no /dev/kvm: hardware virtualization is off or unavailable"
-  sudo -v || die "this needs sudo"
+  # Passwordless users: "sudo -v" can still ask (it requires EVERY matching sudoers rule to
+  # be NOPASSWD), so try a harmless command first; only then ask for the password.
+  sudo -n true 2>/dev/null || sudo -v || die "this needs sudo"
   ok "$PRETTY_NAME, KVM available, sudo works"
 }
 
