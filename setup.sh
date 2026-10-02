@@ -22,8 +22,10 @@ APT_PACKAGES=(
   xorriso bind9-dnsutils curl git gnupg python3 perl openssl        # scripts, ISOs, smoke tests
   ansible-core                                                      # host bridges, Pi-hole
 )
-# HashiCorp's published signing-key fingerprint (Terraform, Packer)
-HASHICORP_FPR="798AEC654E5C15428C8E42EEAA16FCBCA621E701"
+# HashiCorp's Linux package signing key (Terraform, Packer). Rotated 2026-09-09; the new
+# fingerprint was checked against https://www.hashicorp.com/trust/security (a different host
+# from the repository) on 2026-10-02. Old key was 798AEC654E5C15428C8E42EEAA16FCBCA621E701.
+HASHICORP_FPR="D55C0D1AC78A8D8126CB631CFC9CA96ACA026560"
 VIRSH="sudo virsh -c qemu:///system"
 
 check_system() {
@@ -60,21 +62,33 @@ install_hashicorp() {
   step "Terraform and Packer (HashiCorp's repository)"
   local key=/usr/share/keyrings/hashicorp-archive-keyring.gpg
   local list=/etc/apt/sources.list.d/hashicorp.list
-  if ! command -v terraform >/dev/null || ! command -v packer >/dev/null; then
-    if [ ! -f "$list" ]; then
-      local tmp fpr suite
-      tmp=$(mktemp)
-      curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor > "$tmp"
-      fpr=$(gpg --show-keys --with-colons "$tmp" 2>/dev/null | awk -F: '/^fpr/ {print $10; exit}')
-      [ "$fpr" = "$HASHICORP_FPR" ] || die "HashiCorp's signing key has an unexpected fingerprint ($fpr); not trusting it"
-      sudo install -m 0644 "$tmp" "$key" && rm -f "$tmp"
-      # HashiCorp adds new Ubuntu releases some time after they ship; fall back to the previous LTS
-      suite=$(. /etc/os-release; echo "$VERSION_CODENAME")
-      curl -fsI "https://apt.releases.hashicorp.com/dists/$suite/Release" >/dev/null 2>&1 || suite=noble
-      echo "deb [signed-by=$key] https://apt.releases.hashicorp.com $suite main" | sudo tee "$list" >/dev/null
-      echo "  added HashiCorp's repository (suite: $suite, key verified)"
-      sudo apt-get update -q
+  local have="" changed=0
+  [ -f "$key" ] && have=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr/ {print $10; exit}')
+  if [ "$have" != "$HASHICORP_FPR" ]; then           # missing, or an old (rotated) key
+    local tmp fpr
+    tmp=$(mktemp)
+    curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor > "$tmp"
+    fpr=$(gpg --show-keys --with-colons "$tmp" 2>/dev/null | awk -F: '/^fpr/ {print $10; exit}')
+    if [ "$fpr" != "$HASHICORP_FPR" ]; then
+      rm -f "$tmp"
+      die "HashiCorp's signing key has an unexpected fingerprint ($fpr); not trusting it.
+  Check https://www.hashicorp.com/trust/security before changing HASHICORP_FPR."
     fi
+    sudo install -m 0644 "$tmp" "$key" && rm -f "$tmp"
+    echo "  installed HashiCorp's signing key (fingerprint verified)"
+    changed=1
+  fi
+  if [ ! -f "$list" ]; then
+    local suite
+    # HashiCorp adds new Ubuntu releases some time after they ship; fall back to the previous LTS
+    suite=$(. /etc/os-release; echo "$VERSION_CODENAME")
+    curl -fsI "https://apt.releases.hashicorp.com/dists/$suite/Release" >/dev/null 2>&1 || suite=noble
+    echo "deb [signed-by=$key] https://apt.releases.hashicorp.com $suite main" | sudo tee "$list" >/dev/null
+    echo "  added HashiCorp's repository (suite: $suite)"
+    changed=1
+  fi
+  [ "$changed" = 0 ] || sudo apt-get update -q
+  if ! command -v terraform >/dev/null || ! command -v packer >/dev/null; then
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q terraform packer
   fi
   ok "$(terraform version | head -1), $(packer version | head -1)"
