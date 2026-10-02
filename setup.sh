@@ -259,6 +259,37 @@ get_opnsense_iso() {
   ok "$name (both pinned checksums verified)"
 }
 
+# The golden image: installed OPNsense + boot hook, built from the verified ISO by Packer.
+build_golden() {
+  step "Golden image (Packer)"
+  local name="opnsense-$OPNSENSE_VERSION-golden-v2.qcow2"
+  local dest="/var/lib/libvirt/images/$name"
+  local out="$HOME/.cache/opnsense-iac-lab/golden-build"
+  local secrets="${SECRETS_DIR:-$HOME/.config/opnsense-iac-lab}"
+  if sudo test -f "$dest"; then
+    ok "$name already built"
+    return 0
+  fi
+  rm -rf "$out"
+  packer init "$REPO_DIR/opnsense-image" >/dev/null
+  echo "  building from the ISO: about 20 minutes, typing into the installer"
+  echo "  (watch it over VNC on 127.0.0.1:5901 here; from another machine: scripts/lab-in-vm.sh vnc)"
+  # sg kvm: Packer needs /dev/kvm, i.e. the kvm group, which this run may only just have added
+  PKR_VAR_root_password="$(cat "$secrets/root-password")" sg kvm -c \
+    "packer build -var iso_path=$OPNSENSE_ISO -var iso_sha256=$OPNSENSE_ISO_SHA256 -var output_dir=$out $REPO_DIR/opnsense-image"
+  sudo install -o libvirt-qemu -g kvm -m 0440 "$out/golden.qcow2" "$dest"
+  $VIRSH pool-refresh default >/dev/null
+  rm -rf "$out"
+  ok "$name built and placed in the storage pool (read-only)"
+}
+
+# The lab itself. On a fresh machine, rebuild.sh's converge mode builds everything.
+run_lab() {
+  step "The lab (scripts/rebuild.sh)"
+  # sg libvirt: talking to libvirt needs the libvirt group, which this run may only just have added
+  sg libvirt -c "$REPO_DIR/scripts/rebuild.sh"
+}
+
 check_system
 # keep sudo's timestamp fresh during long installs; stops when this script ends
 ( while kill -0 "$$" 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
@@ -270,6 +301,5 @@ setup_libvirt
 setup_user
 setup_machine_values
 get_opnsense_iso
-
-step "Part 1 done"
-echo "  Not written yet: building the golden image (Packer), then the lab build."
+build_golden
+run_lab

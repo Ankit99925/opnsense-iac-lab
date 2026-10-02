@@ -17,7 +17,11 @@ POLICY_DIR="$REPO_DIR/policy"
 # Outside the repo, never in git: backups and API credentials.
 BACKUP_DIR="${BACKUP_DIR:-$HOME/lab-backup}"
 CREDS="${CREDS:-$HOME/.config/opnsense-iac-lab/api.env}"   # automation user, made by gen-secrets.sh
-GOLDEN="opnsense-26.1-golden-v2.qcow2"
+# The golden image is named after the OPNsense version pinned in pins.env
+# shellcheck disable=SC1091
+. "$REPO_DIR/pins.env"
+GOLDEN="opnsense-$OPNSENSE_VERSION-golden-v2.qcow2"
+export TF_VAR_opnsense_golden_image="/var/lib/libvirt/images/$GOLDEN"
 SERVER_IP=192.168.100.10
 # The libvirt provider writes cloud-init ISOs to $TMPDIR; /tmp is tmpfs here.
 export TMPDIR="$HOME/.cache/terraform-tmp"
@@ -59,7 +63,7 @@ done
 virsh uri >/dev/null 2>&1 || die "cannot talk to libvirt (are you in the libvirt group?)"
 virsh pool-refresh default >/dev/null 2>&1 || die "libvirt storage pool 'default' not found"
 virsh vol-info --pool default "$GOLDEN" >/dev/null 2>&1 \
-  || die "golden image $GOLDEN not in pool 'default' (REBUILD.md: Building the OPNsense image)"
+  || die "golden image $GOLDEN not in pool 'default' (./setup.sh builds it)"
 [ -r "$TF_DIR/terraform.tfvars" ]                || die "missing $TF_DIR/terraform.tfvars"
 [ -r "$ANSIBLE_DIR/host_vars/localhost.yml" ]     || die "missing host_vars/localhost.yml (USB adapter name)"
 [ -r "$ANSIBLE_DIR/host_vars/ubuntu-server.yml" ] || die "missing host_vars/ubuntu-server.yml (Pi-hole password)"
