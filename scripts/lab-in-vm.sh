@@ -14,13 +14,13 @@
 #   lab-in-vm.sh destroy   delete the VM and its disks (keeps the cached image and network)
 #
 # Only ever deletes a VM it created itself (it labels them); other VMs are never touched.
-# Settings (environment): LAB_VM_RAM_MB (8192), LAB_VM_CPUS (4), LAB_VM_DISK_GB (100),
+# Settings (environment): LAB_VM_RAM_MB (7168), LAB_VM_CPUS (4), LAB_VM_DISK_GB (100),
 # LAB_VM_POOL (default), LAB_VM_SSH_PUB (~/.ssh/id_ed25519.pub), LAB_VM_YES=1 (don't ask)
 set -euo pipefail
 
 export LIBVIRT_DEFAULT_URI=qemu:///system
 NAME="lab-in-vm"
-RAM_MB="${LAB_VM_RAM_MB:-8192}"
+RAM_MB="${LAB_VM_RAM_MB:-7168}"
 CPUS="${LAB_VM_CPUS:-4}"
 DISK_GB="${LAB_VM_DISK_GB:-100}"
 POOL="${LAB_VM_POOL:-default}"
@@ -62,10 +62,7 @@ preflight() {
   virsh pool-info "$POOL" >/dev/null 2>&1 || die "no libvirt storage pool '$POOL', or libvirt's storage daemon is off:
   sudo systemctl enable --now virtstoraged.socket virtstoraged-ro.socket virtstoraged-admin.socket"
   [ -r "$SSH_PUB" ] || die "no SSH public key at $SSH_PUB (create one: ssh-keygen -t ed25519)"
-  local avail_mb
-  avail_mb=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
-  (( avail_mb >= RAM_MB )) || die "only ${avail_mb} MiB RAM available; the VM needs ${RAM_MB} (set LAB_VM_RAM_MB to change)"
-  echo "  ok: tools, KVM, nested virtualization, libvirt, pool '$POOL', SSH key, ${avail_mb} MiB free"
+  echo "  ok: tools, KVM, nested virtualization, libvirt, pool '$POOL', SSH key"
 }
 
 ensure_network() {
@@ -120,6 +117,14 @@ confirm() {
   local answer
   read -r -p "A '$NAME' VM already exists. $2 (everything in it is lost)? Type '$1': " answer
   [ "$answer" = "$1" ] || die "aborted; nothing was changed"
+}
+
+# RAM is checked after any old lab VM is removed, so its memory counts as free.
+check_ram() {
+  local avail_mb
+  avail_mb=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+  (( avail_mb >= RAM_MB )) || die "only ${avail_mb} MiB RAM available; the VM needs ${RAM_MB} (close some apps, or set LAB_VM_RAM_MB)"
+  echo "  ok: ${avail_mb} MiB RAM available for a ${RAM_MB} MiB VM"
 }
 
 destroy_vm() {
@@ -266,13 +271,13 @@ status() {
 }
 
 case "${1:-}" in
-  up)      preflight; confirm replace "Replace it with a fresh one"; ensure_network; fetch_base; destroy_vm; create_vm; wait_ssh
+  up)      preflight; confirm replace "Replace it with a fresh one"; ensure_network; fetch_base; destroy_vm; check_ram; create_vm; wait_ssh
            echo; echo "Fresh VM ready. Shell later with: $0 ssh"
            if [ -t 0 ] && [ -t 1 ]; then   # a person at a terminal: go straight in
              echo "Opening a shell in the VM (exit to leave; the VM keeps running)"; ssh_vm
            fi ;;
   run)     preflight; confirm replace "Replace it with a fresh one"; ensure_network; fetch_base
-           destroy_vm; create_vm; wait_ssh; run_setup ;;
+           destroy_vm; check_ram; create_vm; wait_ssh; run_setup ;;
   ssh)     shift; ssh_vm "$@" ;;
   status)  status ;;
   vnc)     shift; vnc "$@" ;;
