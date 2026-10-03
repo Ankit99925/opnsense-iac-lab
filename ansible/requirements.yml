@@ -1,0 +1,5 @@
+# Ansible collections the playbooks need, at the versions that were tested.
+# setup.sh installs them with: ansible-galaxy collection install -r ansible/requirements.yml
+collections:
+  - name: community.docker      # pihole.yml: community.docker.docker_compose_v2
+    version: "5.0.4"

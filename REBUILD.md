@@ -123,6 +123,7 @@ Every step is idempotent. Times are from the verified run.
 |---|---|---|
 | System | Ubuntu 26.04? KVM? sudo (asked once, then kept alive)? | seconds |
 | Packages | QEMU, libvirt, xorriso, bzip2, dig, curl, git, Python, Perl, OpenSSL, ansible-core | 3–5 min |
+| Ansible collections | `community.docker`, at the version pinned in `ansible/requirements.yml` | seconds |
 | Terraform and Packer | HashiCorp's apt repository; its signing key checked against `pins.env` (and replaced if an old one is installed) | 1–2 min |
 | Groups | Your user into `libvirt` and `kvm` | seconds |
 | libvirt | Removes libvirt's stock `default` network, unless Terraform manages it; ensures a storage pool | seconds |

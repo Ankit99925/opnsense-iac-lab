@@ -53,7 +53,7 @@ scripts/rebuild.sh --fresh     # destroy everything and rebuild from nothing
 > to a verified lab in **62 minutes, unattended**, with nothing copied in. All 17 smoke tests passed.
 > Creating the VM adds a few minutes, plus Ubuntu's cloud image (~600 MB) the first time.
 
-**How it was built, and the 16 problems found along the way:** [docs/CASE-STUDY.md](docs/CASE-STUDY.md)
+**How it was built, and the 18 problems found along the way:** [docs/CASE-STUDY.md](docs/CASE-STUDY.md)
 Full runbook, options and troubleshooting: [REBUILD.md](REBUILD.md)
 
 ## Topology

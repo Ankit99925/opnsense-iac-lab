@@ -14,6 +14,6 @@ resource "libvirt_cloudinit_disk" "opnsense_config" {
 }
 
 variable "opnsense_golden_image" {
-  description = "Installed OPNsense + boot hook, no config. Built by hand (later Packer). Read-only."
+  description = "Installed OPNsense + boot hook, no config. Built by Packer (opnsense-image/golden.pkr.hcl). Read-only."
   default     = "/var/lib/libvirt/images/opnsense-26.1-golden-v2.qcow2"
 }

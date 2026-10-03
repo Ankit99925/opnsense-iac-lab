@@ -1,5 +1,5 @@
 # libvirt's NAT network. OPNsense's WAN sits on it.
-# Adopted from the hand-built network via imports.tf.
+# Terraform creates it (setup.sh first removes libvirt's stock 'default').
 
 locals {
   # The DHCP reservation, OPNsense's WAN NIC and the route to SERVERS

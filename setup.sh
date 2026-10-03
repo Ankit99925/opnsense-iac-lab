@@ -93,6 +93,14 @@ install_hashicorp() {
   ok "$(terraform version | head -1), $(packer version | head -1)"
 }
 
+# Ansible collections (add-on module packs), pinned in ansible/requirements.yml.
+# ansible-core alone doesn't include them; installing them explicitly makes this repeatable.
+install_collections() {
+  step "Ansible collections (ansible/requirements.yml)"
+  ansible-galaxy collection install -r "$REPO_DIR/ansible/requirements.yml" >/dev/null
+  ok "$(ansible-galaxy collection list community.docker 2>/dev/null | awk '/^community.docker/ {print $1, $2}')"
+}
+
 setup_groups() {
   step "Groups"
   local g
@@ -296,6 +304,7 @@ check_system
 
 install_packages
 install_hashicorp
+install_collections
 setup_groups
 setup_libvirt
 setup_user
