@@ -1,20 +1,67 @@
 # opnsense-iac-lab
 
-A segmented OPNsense firewall lab on KVM, defined entirely in code.
-One command destroys it and rebuilds it from nothing, then verifies it with layered
-smoke tests, including a test that the firewall's block rules came back.
-**About 7 minutes from nothing to verified.**
+**TL;DR:** A segmented OPNsense firewall lab on KVM, defined entirely in code. One command turns
+a fresh Ubuntu 26.04 machine into the whole lab (firewall, VLANs, DHCP, Pi-hole, three VMs) and
+proves it works with 17 smoke tests. Nothing to download or configure by hand.
+
+## Quick start
+
+**You need** (about an hour, unattended):
+
+| Your machine | Free RAM | Free disk | Also |
+|---|---|---|---|
+| Ubuntu 26.04 (`./setup.sh`) | **about 5 GB** (the lab's VMs use ~3 GB; building the golden image briefly 2 GB) | about 40 GB | hardware virtualization on in the BIOS |
+| Any Linux with KVM (`lab-in-vm.sh run`) | **about 7 GB** for the Ubuntu VM that holds the lab (checked before it starts) | about 30 GB | nested virtualization on |
 
 ```bash
-./scripts/rebuild.sh --fresh
+git clone https://github.com/Ankit99925/opnsense-iac-lab.git
+cd opnsense-iac-lab
+
+./setup.sh                              # Ubuntu 26.04: asks for your sudo password once
+# or
+LAB_VM_YES=1 scripts/lab-in-vm.sh run   # any other Linux with KVM: the same, in a fresh Ubuntu VM
 ```
+
+It ends with `All smoke tests passed.` and `Lab rebuilt and verified.` To connect a USB Ethernet
+adapter and Wi-Fi AP to the CLIENTS zone, run `LAB_CLIENTS_NIC=enx... ./setup.sh` (list adapters
+with `ip -br link`). If anything stops, fix the cause and run the same command again: it resumes.
+
+## Using the lab
+
+On the lab host (in the VM path: `scripts/lab-in-vm.sh ssh`, then `cd opnsense-iac-lab`):
+
+```bash
+TRIES=1 scripts/smoke.sh       # check everything still works (read-only, about a minute)
+scripts/rebuild.sh             # apply a change: converge to what the code says
+scripts/rebuild.sh --fresh     # destroy everything and rebuild from nothing
+```
+
+| To change | Edit | Then run |
+|---|---|---|
+| Firewall rules, aliases, DHCP subnets | `policy/*.tf` | `scripts/rebuild.sh` |
+| Zones, addresses, VLANs | `network.json` | `scripts/rebuild.sh --fresh` (the firewall's baseline must be reloaded) |
+| VMs, networks | `terraform/*.tf` | `scripts/rebuild.sh` |
+| OPNsense version, pinned keys | `pins.env` | `./setup.sh` (verify new values first: see REBUILD.md) |
+
+| To reach | From the lab host | Login |
+|---|---|---|
+| OPNsense web GUI | `https://192.168.122.69` | `root`, password in `~/.config/opnsense-iac-lab/root-password` |
+| Pi-hole admin | `http://192.168.100.10/admin` | password in `~/.config/opnsense-iac-lab/pihole-password` |
+| The Ubuntu server | `ssh ubuntu@192.168.100.10` | your SSH key |
+
+> **Last verified 2026-10-02:** on a brand-new Ubuntu 26.04 VM, `setup.sh` went from a bare system
+> to a verified lab in **62 minutes, unattended**, with nothing copied in. All 17 smoke tests passed.
+> Creating the VM adds a few minutes, plus Ubuntu's cloud image (~600 MB) the first time.
+
+**How it was built, and the 16 problems found along the way:** [docs/CASE-STUDY.md](docs/CASE-STUDY.md)
+Full runbook, options and troubleshooting: [REBUILD.md](REBUILD.md)
 
 ## Topology
 
 ```mermaid
 flowchart TB
   inet((Internet)) --- nat
-  subgraph host["mera-server: Ubuntu 26.04, KVM/libvirt"]
+  subgraph host["lab host: Ubuntu 26.04, KVM/libvirt"]
     nat["default network<br/>libvirt NAT 192.168.122.0/24"]
     opn["OPNsense<br/>firewall, router, Kea DHCP"]
     srv["ubuntu-server<br/>Pi-hole 192.168.100.10"]
@@ -30,17 +77,18 @@ flowchart TB
 
 | Piece | Tool | Job |
 |---|---|---|
-| Network description | `network.json` | Zones, addresses, DHCP pools, VLAN tags: written once, read by everything below |
-| Host networking | Ansible | Linux bridges for CLIENTS and the VLAN trunk (netplan) |
+| Host setup | `setup.sh` | Packages, Terraform and Packer (signing key checked), groups, generated secrets and machine values, then everything below |
+| Pinned inputs | `pins.env` | OPNsense version and checksums, HashiCorp's key fingerprint: one place, each noting how it was verified |
+| Network description | `network.json` | Zones, addresses, DHCP pools, VLAN tags: written once, read by the baseline generator and the policy |
+| Golden image | Packer (`opnsense-image/`) | Installs OPNsense from the checked ISO by typing through its installer, adds the boot hook |
+| Host networking | Ansible | Linux bridges for CLIENTS and the VLAN trunk (netplan; NetworkManager or systemd-networkd) |
 | Networks and VMs | Terraform (`terraform/`, libvirt provider) | NAT and isolated networks, three VMs, cloud-init, autostart |
-| Firewall, Day 0 | Golden image + generated baseline | Installed OPNsense image; `render-baseline.py` builds its config (interfaces, VLANs, users, API key, certificate) and a boot hook loads it |
+| Firewall, Day 0 | Generated baseline | `render-baseline.py` builds OPNsense's config (interfaces, VLANs, users, API key, certificate); the boot hook loads it |
 | Firewall, Day 1 | Terraform (`policy/`, OPNsense provider) | Aliases, 28 firewall rules and Kea subnets, pushed through the API |
 | Services | Ansible | Pi-hole in Docker on the Ubuntu server |
-| Orchestration | Bash | `scripts/rebuild.sh`: preflight, secrets, baseline, build, policy, configure, test |
-| Verification | Bash + QEMU guest agent | `scripts/smoke.sh`: six layers, host to firewall rules, plus a drift check |
-
-`rebuild.sh` has two modes: **converge** (default: build what is missing, fix drift, safe to
-rerun after a failure) and **`--fresh`** (destroy everything, then build from nothing).
+| Orchestration | Bash | `scripts/rebuild.sh`: converge (default) or `--fresh` |
+| Verification | Bash + QEMU guest agent | `scripts/smoke.sh`: six layers, plus a drift check |
+| Test harness | `scripts/lab-in-vm.sh` | Fresh Ubuntu VM on any KVM machine, clone from GitHub, run `setup.sh` |
 
 ## What the smoke tests prove
 
@@ -57,11 +105,23 @@ rerun after a failure) and **`--fresh`** (destroy everything, then build from no
 
 ## Design decisions
 
+- **Proven on fresh machines, not just the original.** `lab-in-vm.sh run` builds from a blank
+  Ubuntu VM, cloning the public repo. Doing that exposed four assumptions the original host had
+  been hiding: `sudo -v` prompting a passwordless user, HashiCorp's rotated signing key, the
+  installer's real timings, and NetworkManager-only bridge settings on a systemd-networkd host.
+  Each is now handled in code.
+- **Every input is pinned and verified.** The OPNsense ISO is checked against OPNsense's
+  published checksum and against an independent earlier copy; HashiCorp's signing key against
+  its fingerprint. When HashiCorp rotated its key, the build stopped instead of trusting it;
+  the new fingerprint was confirmed on a different HashiCorp host before the pin was changed.
+- **The golden image is built, not stored.** Packer types through OPNsense's installer. The
+  waits come from watching a real install (the root password takes 5-10 s to apply; the reboot
+  longer than estimated), and the root password avoids characters that need Shift.
 - **Firewall as code, in two layers.** A small **baseline** holds only what OPNsense's API
-  cannot do (interfaces, VLANs, users, API key, certificate); it is generated from OPNsense's
-  own factory config plus `network.json`, and loaded at boot by a hook in the golden image.
-  The **policy** (aliases, rules, Kea subnets) is Terraform code pushed through the API. The
-  same pattern vendors use: a bootstrap config, then policy from a source of truth.
+  cannot do; it is generated from OPNsense's own factory config plus `network.json`, and loaded
+  at boot by a hook in the golden image. The **policy** (aliases, rules, Kea subnets) is
+  Terraform code pushed through the API. The same pattern vendors use: a bootstrap config,
+  then policy from a source of truth.
 - **One description of the network.** `network.json` feeds both the baseline generator and
   the policy stack. Client zones share one six-rule pattern, so a new VLAN is one line.
 - **Deterministic generation.** Secrets are created once and reused; IDs are derived from
@@ -70,59 +130,50 @@ rerun after a failure) and **`--fresh`** (destroy everything, then build from no
 - **Least privilege for automation.** Root has no API key; a separate `automation` user does.
   SSH to the firewall is key-only, with lockout on.
 - **Moving from restore to code exposed real problems.** The old restored config carried dead
-  settings (an old server's DHCP reservation), WireGuard that could never work behind CGNAT, a
-  CLIENTS zone that could reach the hypervisor, and VLANs told to use an NTP server they were
-  blocked from. The code-built firewall has none of them, and DNS is now forced through Pi-hole.
+  settings, WireGuard that could never work behind CGNAT, a CLIENTS zone that could reach the
+  hypervisor, and VLANs told to use an NTP server they were blocked from.
 - **Backups are checked, not trusted.** OPNsense's backup API serves the newest entry in its
-  configuration *history*; after a rebuild that was once the factory config, and a rebuild
-  loaded it. Backups are now only a safety net, and the backup step rejects factory configs.
-- **Hand-built things were brought under code.** libvirt's `default` network (DHCP
-  reservation and route) was imported into Terraform; a provider gap forced a planned
-  one-time replacement.
-- **Nothing important lives in `/tmp`.** The provider writes cloud-init ISOs to `$TMPDIR`,
-  which is tmpfs on this host; VMs attach copies in the storage pool, and a Terraform
-  `check` block warns if an ISO ever lands in `/tmp`.
-- **VMs are cattle.** Drift inside a VM (a hand edit moved vlantest to another VLAN) is fixed
-  by rebuilding it from code. The smoke tests caught that drift.
-- **Secrets stay out of git.** State, tfvars, host variables, generated secrets and the
-  rendered baseline are gitignored or live outside the repo; history is scanned with gitleaks.
+  configuration *history*; after a rebuild that was once the factory config. Backups are now
+  only a safety net, and the backup step rejects factory configs.
+- **Nothing important lives in `/tmp`.** It is tmpfs on Ubuntu; VMs attach copies of their
+  cloud-init ISOs in the storage pool, and a Terraform `check` block warns otherwise.
+- **VMs are cattle.** Drift inside a VM is fixed by rebuilding it from code.
+- **Secrets stay out of git.** Generated into `~/.config/opnsense-iac-lab/`, never committed;
+  history is scanned with gitleaks.
 
 ## Prerequisites
 
-- **A Linux host.** The libvirt provider and netplan are Linux-only; built and tested on
-  Ubuntu Server 26.04, x86-64 with hardware virtualization, 12 GB RAM or more.
-- **Host tools:** libvirt/QEMU, Terraform, Ansible (with the `community.libvirt`,
-  `community.general` and `community.docker` collections), curl, dig, Python 3, Perl, OpenSSL.
-  *(Next: `bootstrap.sh` installs them.)*
-- **For the CLIENTS zone:** a USB Ethernet adapter and a Wi-Fi access point.
-- **Files kept out of git on purpose.** The repo holds the code, not the data it builds with:
-  - the OPNsense **golden image**: too big for git; built once (see REBUILD.md)
-  - **machine-specific values:** `terraform.tfvars`, the Ansible `host_vars`, an SSH key
-  - **lab secrets** (root password, API key, certificate): generated on the first run by
-    `scripts/gen-secrets.sh` into `~/.config/opnsense-iac-lab/`
+- **Ubuntu 26.04 LTS** for `setup.sh`, or **any Linux with KVM and libvirt** for
+  `scripts/lab-in-vm.sh` (which runs `setup.sh` inside an Ubuntu VM). Windows and macOS: no.
+- **Hardware virtualization;** 12 GB RAM natively, or about 7 GB free plus nested
+  virtualization for the VM path.
+- **Optional:** a USB Ethernet adapter and a Wi-Fi AP for CLIENTS (`LAB_CLIENTS_NIC=enx...`).
+- **Internet access** to GitHub, Ubuntu, HashiCorp and `pkg.opnsense.org`.
+- **Nothing to copy:** secrets are generated, the ISO is downloaded, the golden image is built.
 
-No OPNsense config backup is needed: the firewall is built from code.
-Exact paths and the full rebuild procedure: **[REBUILD.md](REBUILD.md)**.
+Options, timings and troubleshooting: **[REBUILD.md](REBUILD.md)**.
 
 ## Limitations and next steps
 
-- The golden image is built by hand (next: Packer, with a unique root password).
-- Tools are installed by hand on the host (next: `bootstrap.sh`, proven on a fresh Ubuntu VM).
+- One host, local Terraform state (teams use a remote backend).
 - Interface assignment stays in the baseline: OPNsense's API does not cover it.
-- Terraform state is a local file (fine for one person; teams use a remote backend).
-- Later: a read-only API key for monitoring; generate `network.json` from a CSV parameter
-  sheet; trigger rebuilds from CI.
+- Converge mode cannot yet apply a baseline change (OPNsense must reboot to load it); `--fresh` can.
+- OPNsense 26.1; moving to 26.7 is a pin change plus a test run.
+- The ISO is checked by checksum; verifying OPNsense's release signature is next.
+- Later: a nightly CI run of `lab-in-vm.sh run`, a CSV parameter sheet, a read-only monitoring key.
 
 ## Repo layout
 
 ```
-network.json      the network's shape: zones, addresses, pools, VLAN tags
+setup.sh          one command: fresh Ubuntu 26.04 -> verified lab
+pins.env          pinned versions, checksums and signing keys
+network.json      zones, addresses, pools, VLAN tags
 terraform/        networks, VMs, cloud-init, config ISO, guards
-policy/           OPNsense aliases, firewall rules, Kea subnets (through the API)
+policy/           OPNsense aliases, rules, Kea subnets (through the API)
 ansible/          host bridges, Pi-hole
-scripts/          rebuild.sh, smoke.sh, tapcheck, gen-secrets.sh, render-baseline.py
-opnsense-image/   boot hook, OPNsense factory config (secrets removed)
-REBUILD.md        runbook: rebuild from scratch, gotchas, automation status
+opnsense-image/   Packer template, boot hook, OPNsense factory config
+scripts/          rebuild.sh, smoke.sh, tapcheck, gen-secrets.sh, render-baseline.py, lab-in-vm.sh
+REBUILD.md        runbook: how it works, gotchas, automation status
 ```
 
 ---
@@ -184,12 +235,14 @@ Four bridges exist on the host, created by three different things.
 
 | Piece | Managed by |
 |-------|------------|
+| Host packages, groups, secrets, machine values | `setup.sh` |
+| Pinned versions, checksums, signing keys | `pins.env` |
 | Zones, addresses, pools, VLAN tags | `network.json` |
 | `default` network, incl. OPNsense's DHCP reservation and the host route to SERVERS | Terraform (`terraform/`) |
 | SERVERS network, all VMs, volumes, cloud-init and config ISOs | Terraform (`terraform/`) |
 | `br-clients`, `br-trunk` | Ansible |
 | Pi-hole | Ansible |
-| OPNsense installed system and boot hook | Golden image (built by hand, see REBUILD.md) |
+| OPNsense installed system and boot hook | Golden image, built by Packer (`opnsense-image/golden.pkr.hcl`) |
 | OPNsense interfaces, VLAN devices, users, API key, certificate, SSH, Kea on/off | Baseline, generated by `scripts/render-baseline.py` |
 | Firewall aliases, rules, Kea subnets | Terraform (`policy/`), through the API |
 
@@ -201,7 +254,8 @@ is attached to the bridge it should be, and the drift check confirms the firewal
 
 ## Rebuild order
 
-One command, from the repo root:
+On a new machine, `./setup.sh` prepares the host and ends by running this. Afterwards, run it
+directly to apply changes:
 
     ./scripts/rebuild.sh            # converge: build what is missing, fix drift
     ./scripts/rebuild.sh --fresh    # destroy everything, then build from nothing
@@ -219,16 +273,16 @@ It runs, in order:
 9. **Ansible** deploys Pi-hole
 10. **Smoke tests,** all six layers
 
-Details, failure recovery and the files that are not in git: [REBUILD.md](REBUILD.md).
+Details and failure recovery: [REBUILD.md](REBUILD.md).
 
 ## What is still done by hand
 
-- **Building the golden image,** rarely: a new OPNsense version or a hook change. Steps in REBUILD.md.
-- **Installing the host's tools** (next: `bootstrap.sh`).
-- **Restoring the non-git files** onto a new machine (golden image, tfvars, host_vars, SSH key, lab secrets).
+- **Typing your sudo password once** when `setup.sh` starts (on a real machine).
+- **Physical things:** plugging in the USB adapter, and setting the Wi-Fi AP to access-point mode.
+- **Reading a failure,** fixing the cause, running the same command again (everything resumes).
+- **Changing a pin** in `pins.env`, deliberately, after verifying the new value.
 
-Firewall changes are **not** done by hand any more: edit `policy/` or `network.json`, run
-`rebuild.sh`, check the smoke tests.
+Nothing is built, copied or restored by hand any more.
 
 ---
 
