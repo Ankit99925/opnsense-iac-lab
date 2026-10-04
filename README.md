@@ -55,7 +55,7 @@ scripts/rebuild.sh --fresh     # destroy everything and rebuild from nothing
 >
 > **Verified on real hardware 2026-10-04:** on mera-server (Ubuntu 26.04, a USB adapter and Wi-Fi AP on CLIENTS), `setup.sh` built the lab from a wiped state and all 17 smoke tests passed. It stopped once, at problem 19 (fixed in code), and resumed: the lab itself took 9 minutes. A phone on the Wi-Fi then got an address from the new pool and browsed through Pi-hole.
 
-**How it was built, and the 19 problems found along the way:** [docs/CASE-STUDY.md](docs/CASE-STUDY.md)
+**How it was built, and the 20 problems found along the way:** [docs/CASE-STUDY.md](docs/CASE-STUDY.md)
 Full runbook, options and troubleshooting: [REBUILD.md](REBUILD.md)
 
 ## Topology

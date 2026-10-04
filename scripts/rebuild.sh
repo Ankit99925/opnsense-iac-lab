@@ -5,7 +5,7 @@
 #   rebuild.sh --fresh          destroy everything first, then build from nothing
 #   rebuild.sh --fresh --yes    same, without the confirmation prompt
 #
-# Needs the files listed in REBUILD.md under "Files that are NOT in git".
+# On a new machine, run ./setup.sh first: it creates everything this needs.
 set -euo pipefail
 
 # Everything in the repo is found relative to this script,
@@ -58,7 +58,7 @@ api_up() {
 # ------------------------------------------------------------------ preflight
 step "Preflight"
 for c in virsh terraform ansible ansible-playbook curl dig python3 perl openssl ssh-keyscan; do
-  command -v "$c" >/dev/null || die "missing command: $c (see bootstrap in REBUILD.md)"
+  command -v "$c" >/dev/null || die "missing command: $c (run ./setup.sh)"
 done
 virsh uri >/dev/null 2>&1 || die "cannot talk to libvirt (are you in the libvirt group?)"
 virsh pool-refresh default >/dev/null 2>&1 || die "libvirt storage pool 'default' not found"
@@ -89,6 +89,7 @@ step "OPNsense config backup"
 # golden image's factory config. So a download is only accepted if it looks like
 # the lab's config; otherwise the existing 'latest' is kept.
 latest="$BACKUP_DIR/config-OPNsense-latest.xml"
+mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"   # backups hold password hashes and keys
 if api_up; then
   out="$BACKUP_DIR/config-OPNsense-$(date +%F-%H%M%S).xml"
   curl -sk --max-time 20 -u "$OPN_KEY:$OPN_SECRET" \
