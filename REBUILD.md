@@ -152,8 +152,8 @@ everything done. It still ends by running `rebuild.sh`, which converges the live
 | `scripts/rebuild.sh --fresh --yes` | Same, without asking | Automation |
 
 Stages: preflight → secrets and baseline (`gen-secrets.sh`, `render-baseline.py`) → config
-backup (safety net) → host bridges (Ansible; asks for the sudo password only if sudo needs
-one) → destroy (`--fresh` only) → Terraform (`terraform/`) → wait for OPNsense's API (boot,
+backup (safety net) → host bridges (Ansible, run through sudo: no separate password
+question) → destroy (`--fresh` only) → Terraform (`terraform/`) → wait for OPNsense's API (boot,
 baseline load, one reboot) → firewall policy (Terraform, `policy/`) → Ubuntu server (SSH,
 host key, cloud-init) → Pi-hole (Ansible) → smoke tests.
 
@@ -330,6 +330,7 @@ Host pihole-admin                # then browse http://localhost:8080/admin
 |---|---|---|
 | `setup.sh` stops: HashiCorp key has an unexpected fingerprint | HashiCorp rotated its key | Verify the new one independently, update `HASHICORP_FPR` in `pins.env` |
 | `[sudo: authenticate] Password:` although sudo is passwordless | `sudo -v` requires *every* matching sudoers rule to be NOPASSWD | `setup.sh` tries `sudo -n true` first; only then `sudo -v` |
+| Bridges step: "Premature end of stream waiting for become success" / "sudo: a password is required" | Ansible became root with `sudo.ws`, whose password cache is separate from `sudo`'s (sudo-rs) | `rebuild.sh` runs the bridges playbook through `sudo` itself |
 | `netplan apply`: "networkmanager backend settings found but renderer is not NetworkManager" | Template's NetworkManager block on a systemd-networkd host | `bridge.yml` now includes it only where NetworkManager runs |
 | Packer build goes off course after the password | Keys sent before the menu returned | Lengthen that wait (see the table above) |
 | `lab-in-vm.sh`: "only N MiB RAM available" | Not enough free RAM | Close apps, or `LAB_VM_RAM_MB` |

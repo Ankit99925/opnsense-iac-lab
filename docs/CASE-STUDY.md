@@ -5,7 +5,7 @@
 I turned a firewall lab I had built by hand (an OPNsense VM, Ubuntu VMs, bridges and VLANs on
 KVM) into code that rebuilds it from nothing and proves it works. Today, one command on a fresh
 Ubuntu 26.04 machine produces the whole lab, firewall policy included, in about an hour,
-unattended, and ends with 17 smoke tests. Getting there meant finding and fixing 18 real
+unattended, and ends with 17 smoke tests. Getting there meant finding and fixing 19 real
 problems; most were assumptions that only broke on a machine that wasn't mine.
 
 **Run it**
@@ -124,11 +124,13 @@ The real test: a machine that has never seen the lab.
 | 16 | Mirror returned 403 for my OPNsense version | Mirrors keep only the newest major release | Download once from the archive, cache it, verify by pinned checksum |
 | 17 | A needed Ansible collection was only installed by accident | My check for which modules the playbooks use matched names with letters only, and missed `docker_compose_v2` | Collections pinned in `ansible/requirements.yml`, installed by `setup.sh` |
 | 18 | DHCP could hand out the Wi-Fi AP's address | The CLIENTS pool (.50-.200) included the AP's fixed .51 | Pool starts at .100, like the other zones |
+| 19 | First run on real hardware failed at the bridges: "sudo: a password is required" | My check "does sudo need a password?" asked sudo-rs's cache, but Ansible used classic sudo (`sudo.ws`), whose cache is separate. The test VM has passwordless sudo, so it never showed | Run the local bridges playbook through `sudo` itself |
 
 Problems 8, 9, 13 and 15 only appeared on the fresh machine. My original host had been quietly
 covering for them, which is the best argument I know for testing on a clean machine.
 Problems 17 and 18 were found by reading every line of the code while writing a line-by-line
 explanation of it, which is the best argument I know for explaining your own code.
+Problem 19 only appeared on real hardware, with a real sudo password: a VM can't catch everything.
 
 ---
 

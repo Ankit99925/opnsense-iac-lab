@@ -114,11 +114,14 @@ else
 fi
 
 # --------------------------------------------------------------- host bridges
-step "Host bridges (Ansible; asks for your sudo password if sudo needs one)"
+step "Host bridges (Ansible, run through sudo)"
 # Idempotent: if the bridges already match, nothing changes and running VMs stay plugged in.
-# -K asks for the sudo password; skip it when sudo needs none, so unattended runs never hang.
-BECOME=(-K); sudo -n true 2>/dev/null && BECOME=()
-( cd "$ANSIBLE_DIR" && ansible-playbook -i inventory.ini bridge.yml "${BECOME[@]}" )
+# This playbook only touches THIS machine, so it runs through sudo itself: sudo asks for a
+# password only if it has none cached (setup.sh's is still valid), and Ansible's own become
+# prompt (-K) is never needed. That prompt used to be skipped when "sudo -n true" worked, but
+# that tested sudo-rs's cache, while Ansible becomes root with sudo.ws (host_vars), whose cache
+# is separate: on a machine where sudo needs a password, the bridges step failed.
+( cd "$ANSIBLE_DIR" && sudo ansible-playbook -i inventory.ini bridge.yml )
 
 # -------------------------------------------------------------------- destroy
 if (( FRESH )); then
