@@ -8,6 +8,8 @@ when something goes wrong.
 > generated secrets, ISO downloaded and checked, golden image built by Packer, all 17 smoke tests
 > passed. Nothing was copied from another machine. Creating the VM adds a few minutes, plus
 > downloading Ubuntu's cloud image (~600 MB) the first time; that run reused a cached, checked copy.
+>
+> **Verified on real hardware 2026-10-04:** on mera-server (Ubuntu 26.04, a USB adapter and Wi-Fi AP on CLIENTS), `setup.sh` built the lab from a wiped state and all 17 smoke tests passed. It stopped once, at problem 19 (fixed in code), and resumed: the lab itself took 9 minutes. A phone on the Wi-Fi then got an address from the new pool and browsed through Pi-hole.
 
 ---
 
@@ -351,6 +353,7 @@ Host pihole-admin                # then browse http://localhost:8080/admin
 |---|---|
 | Fresh Ubuntu 26.04 → verified lab, one command (`setup.sh`) | **Done**, verified 2026-10-02 (62 min, unattended) |
 | Any Linux with KVM → the same, in a VM (`lab-in-vm.sh run`) | **Done** |
+| Real hardware (mera-server, USB adapter + Wi-Fi AP) | **Done**, verified 2026-10-04 (resumed once, after problem 19) |
 | Golden image built by Packer from the pinned ISO | **Done** |
 | Pinned and verified inputs (`pins.env`) | **Done** |
 | Firewall as code: baseline + 28 rules, aliases, Kea subnets | **Done** |

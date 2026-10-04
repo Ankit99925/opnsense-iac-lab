@@ -33,6 +33,7 @@ the root password for OPNsense's console is in `~/.config/opnsense-iac-lab/root-
 |---|---|
 | Rebuild of the lab on its host | about 7.5 minutes |
 | `setup.sh` on a fresh Ubuntu VM → verified lab | 62 minutes, unattended, nothing copied in (creating the VM adds a few minutes, plus ~600 MB for Ubuntu's cloud image the first time) |
+| `setup.sh` on real hardware (wiped host) | verified; the lab itself in 9 minutes once the golden image existed |
 | Smoke tests | 17 checks in 6 layers, incl. a drift check and firewall block tests |
 | Firewall policy as code | 3 aliases, 28 rules, 5 DHCP subnets |
 | Tools | Terraform, Ansible, Packer, Bash, Python, libvirt/KVM, OPNsense |
@@ -99,6 +100,9 @@ The real test: a machine that has never seen the lab.
 - Acceptance run: `setup.sh` took **62 minutes with no input,** and all 17 checks passed. (The
   VM itself took a few more minutes to create, and Ubuntu's cloud image was already cached from
   earlier runs; a first-ever run also downloads it, about 600 MB.)
+- Then on real hardware: I wiped the lab from mera-server and ran `setup.sh` with the real USB
+  adapter. It found problem 19 (a sudo detail the VM's passwordless sudo had hidden); after the
+  fix, it resumed, all 17 checks passed, and a phone on the Wi-Fi browsed through Pi-hole.
 
 ---
 
