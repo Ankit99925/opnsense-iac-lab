@@ -37,13 +37,11 @@ mkdir -p "$CACHE" && touch "$KNOWN_HOSTS"
 say() { printf '\033[1m== %s\033[0m\n' "$*"; }
 die() { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# need COMMAND FEDORA_PKG UBUNTU_PKG: stop with install instructions if COMMAND is missing
+# need COMMAND FEDORA_PKG UBUNTU_PKG: note COMMAND if missing; preflight reports them all at once
+MISSING_CMDS=() MISSING_FEDORA=() MISSING_UBUNTU=()
 need() {
   command -v "$1" >/dev/null && return 0
-  die "missing: $1
-  Fedora:              sudo dnf install $2
-  Bazzite / Silverblue: rpm-ostree install $2 (then reboot), or use a distrobox
-  Ubuntu / Debian:     sudo apt install $3"
+  MISSING_CMDS+=("$1"); MISSING_FEDORA+=("$2"); MISSING_UBUNTU+=("$3")
 }
 
 preflight() {
@@ -54,6 +52,12 @@ preflight() {
   need curl      curl            curl
   need sha256sum coreutils       coreutils
   need ssh       openssh-clients openssh-client
+  if (( ${#MISSING_CMDS[@]} )); then
+    die "missing: ${MISSING_CMDS[*]}
+  Fedora:              sudo dnf install ${MISSING_FEDORA[*]}
+  Bazzite / Silverblue: rpm-ostree install ${MISSING_FEDORA[*]} (then reboot), or use a distrobox
+  Ubuntu / Debian:     sudo apt install ${MISSING_UBUNTU[*]}"
+  fi
   [ -e /dev/kvm ] || die "no /dev/kvm: KVM is not available (virtualization off in the BIOS?)"
   local nested
   nested=$(cat /sys/module/kvm_intel/parameters/nested /sys/module/kvm_amd/parameters/nested 2>/dev/null | head -1 || true)
